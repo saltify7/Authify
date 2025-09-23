@@ -4,7 +4,7 @@ Authify is a (mostly vibe-coded) Caido plugin for seamless Authorization testing
 
 ## Features
 
-You can also the "How to use" guide in the plugin's navigation bar or find a brief description of features below.
+You can use the "How to use" guide in the plugin's navigation bar or find a brief description of features below.
 
 ### Main functionality:
 - Authify will automatically repeat requests, replacing headers with those provided in the Configuration
