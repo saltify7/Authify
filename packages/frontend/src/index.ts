@@ -70,6 +70,50 @@ export const init = (sdk: FrontendSDK) => {
     applyHeadersToReplay: "authify.apply-headers-to-replay",
   } as const;
 
+  // Helper function to extract request IDs from BaseContext (replay and http-history pages)
+  const getRequestIdsFromBaseContext = (): string[] => {
+    try {
+      let requestId: string | undefined;
+      
+      switch (location.hash) {
+        case "#/http-history": {
+          console.log("Getting request from http-history HTML");
+          
+          // there's always a request selected in http history
+          requestId = document
+            .querySelector(".c-response[data-request-id]")
+            ?.getAttribute("data-request-id") as string;
+          
+          break;
+        }
+        case "#/replay": {
+          console.log("Getting request from replay HTML");
+          
+          const div: Element | null = document.querySelector(
+            ".c-response[data-request-id]"
+          );
+          if (!div) {
+            throw new Error("Request must be sent first");
+          }
+          
+          requestId = div.getAttribute("data-request-id") as string;
+          break;
+        }
+        default:
+          throw new Error("Can't find request");
+      }
+      
+      if (requestId) {
+        return [requestId];
+      } else {
+        throw new Error("No request ID found in current page");
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(`No request found in current page: ${errorMessage}`);
+    }
+  };
+
   // Register command for processing requests from HTTP history
   sdk.commands.register(Commands.processRequestFromHistory, {
     name: "Process with Authify",
@@ -85,6 +129,15 @@ export const init = (sdk: FrontendSDK) => {
       } else if ((context as any)?.type === "RequestContext" && (context as any)?.request?.id) {
         // Single request selected
         requestIds = [(context as any).request.id];
+      } else if ((context as any)?.type === "BaseContext" || !(context as any)?.type) {
+        // BaseContext or no specific context - try to get request from current page
+        try {
+          requestIds = getRequestIdsFromBaseContext();
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          sdk.window.showToast(errorMessage, { variant: "error" });
+          return;
+        }
       } else {
         sdk.window.showToast("No request selected", { variant: "error" });
         return;
@@ -139,6 +192,15 @@ export const init = (sdk: FrontendSDK) => {
       } else if ((context as any)?.type === "RequestContext" && (context as any)?.request?.id) {
         // Single request selected
         requestIds = [(context as any).request.id];
+      } else if ((context as any)?.type === "BaseContext" || !(context as any)?.type) {
+        // BaseContext or no specific context - try to get request from current page
+        try {
+          requestIds = getRequestIdsFromBaseContext();
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          sdk.window.showToast(errorMessage, { variant: "error" });
+          return;
+        }
       } else {
         sdk.window.showToast("No request selected", { variant: "error" });
         return;
@@ -207,6 +269,15 @@ export const init = (sdk: FrontendSDK) => {
       } else if ((context as any)?.type === "RequestContext" && (context as any)?.request?.id) {
         // Single request selected
         requestIds = [(context as any).request.id];
+      } else if ((context as any)?.type === "BaseContext" || !(context as any)?.type) {
+        // BaseContext or no specific context - try to get request from current page
+        try {
+          requestIds = getRequestIdsFromBaseContext();
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          sdk.window.showToast(`Please send the request before applying new headers: ${errorMessage}`, { variant: "error" });
+          return;
+        }
       } else {
         sdk.window.showToast("Please send the request before applying new headers", { variant: "error" });
         return;
@@ -275,6 +346,7 @@ export const init = (sdk: FrontendSDK) => {
     leadingIcon: "fas fa-arrow-up",
   });
 
+
   // Add "Apply headers to Replay" to context menu for request rows
   sdk.menu.registerItem({
     type: "RequestRow",
@@ -288,5 +360,10 @@ export const init = (sdk: FrontendSDK) => {
     commandId: Commands.applyHeadersToReplay,
     leadingIcon: "fas fa-arrow-down",
   });
+
+  // Add commands to command palette for global access
+  sdk.commandPalette.register(Commands.sendHeadersToAuthify);
+  sdk.commandPalette.register(Commands.processRequestFromHistory);
+  sdk.commandPalette.register(Commands.applyHeadersToReplay);
 
 };

@@ -272,6 +272,9 @@ onMounted(async () => {
   
   // Listen for custom events to update auth headers from context menu
   window.addEventListener('authify-update-headers', handleAuthHeadersUpdate as unknown as EventListener);
+  
+  // Add keyboard shortcut for CTRL+R to send current row to replay
+  window.addEventListener('keydown', handleGlobalKeydown);
 });
 
 onBeforeUnmount(() => {
@@ -282,6 +285,9 @@ onBeforeUnmount(() => {
   
   // Clean up auth headers update listener
   window.removeEventListener('authify-update-headers', handleAuthHeadersUpdate as unknown as EventListener);
+  
+  // Clean up keyboard shortcut listener
+  window.removeEventListener('keydown', handleGlobalKeydown);
   
   // Clean up ResizeObserver
   if (resizeObserver !== undefined) {
@@ -641,6 +647,18 @@ const handleTableKeydown = (event: KeyboardEvent) => {
       // If nothing is selected, select the first row
       selected.value = rows.value[0];
     }
+  }
+};
+
+// Function to handle global keyboard shortcuts
+const handleGlobalKeydown = (event: KeyboardEvent) => {
+  // Check if CTRL+R is pressed and we're in the Traffic tab with a selected row
+  if (event.ctrlKey && event.key === 'r' && activeTabIndex.value === 1 && selected.value) {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    // Send the current row to replay (original or modified based on showModified toggle)
+    void sendToReplay();
   }
 };
 
@@ -1045,7 +1063,7 @@ X-CSRF-Token: def456"
             <div class="flex items-center justify-center flex-1">
               <Button
                 @click="sendToReplay"
-                label="Send to Replay"
+                label="Send to Replay (CTRL+R)"
                 icon="fas fa-paper-plane"
                 severity="secondary"
                 size="small"
