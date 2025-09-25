@@ -4,6 +4,7 @@
 
 ## LOGIC
 - drop requests (if possible to intercept, resend and drop)
+- automatic cookie and auth header extraction from modified responses
 
 ## PERFORMANCE
 - allow table limit to be customised (set to 500 rows for now)
