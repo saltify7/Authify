@@ -13,9 +13,13 @@ import Dropdown from "primevue/dropdown";
 
 import { useSDK } from "@/plugins/sdk";
 import { prettifyHttpData } from "@/utils/json-prettify";
+import { StorageManager } from "@/utils/storage";
 
 // SDK instance
 const sdk = useSDK();
+
+// Storage manager instance
+const storage = new StorageManager(sdk);
 
 // Caido request/response editors
 const reqEditor = ref<any>(null);
@@ -89,9 +93,6 @@ const activeTabIndex = ref(0);
 let poll: number | undefined = undefined;
 let resizeObserver: ResizeObserver | undefined = undefined;
 
-// Raw HTTP dialogs state
-// no dialog state needed; editors are populated directly on selection
-
 // Function to calculate and set the traffic container height
 const updateTrafficHeight = () => {
   // Get the window height
@@ -110,12 +111,7 @@ const handleAuthHeadersUpdate = async (event: CustomEvent) => {
     auth.value = event.detail.headers;
     
     // Save to storage for persistence
-    try {
-      localStorage.setItem("authify-auth-headers", event.detail.headers);
-      console.log("Saved updated auth headers to localStorage");
-    } catch (error) {
-      console.warn("Could not save updated auth headers to localStorage:", error);
-    }
+    await storage.saveAuthHeaders(event.detail.headers);
   }
 };
 
@@ -151,61 +147,27 @@ const refreshScopes = async () => {
   }
 };
 
-// Load auth headers from storage
-const loadAuthHeaders = async () => {
-  try {
-    const storedHeaders = localStorage.getItem("authify-auth-headers");
-    if (storedHeaders) {
-      auth.value = storedHeaders;
-      console.log("Loaded auth headers from localStorage");
-    }
-  } catch (error) {
-    console.warn("Could not load auth headers from localStorage:", error);
+// Load all settings from storage at once
+const loadAllSettings = async () => {
+  const settings = await storage.loadAllSettings();
+  
+  // Load auth headers
+  if (settings.authHeaders) {
+    auth.value = settings.authHeaders;
   }
-};
-
-// Load JSON prettification setting from storage
-const loadJsonPrettifySetting = async () => {
-  try {
-    const storedSetting = localStorage.getItem("authify-json-prettify");
-    if (storedSetting !== null) {
-      enableJsonPrettify.value = storedSetting === "true";
-      console.log("Loaded JSON prettify setting from localStorage:", enableJsonPrettify.value);
-    }
-  } catch (error) {
-    console.warn("Could not load JSON prettify setting from localStorage:", error);
-  }
-};
-
-
-// Save JSON prettification setting to storage
-const saveJsonPrettifySetting = async () => {
-  try {
-    localStorage.setItem("authify-json-prettify", enableJsonPrettify.value.toString());
-    console.log("Saved JSON prettify setting to localStorage:", enableJsonPrettify.value);
-  } catch (error) {
-    console.warn("Could not save JSON prettify setting to localStorage:", error);
-  }
+  
+  // Note: selected scope is loaded separately in loadWorkspaceScopes()
+  // because it depends on the available scopes being loaded first
 };
 
 // Save selected scope to storage
 const saveSelectedScope = async () => {
-  try {
-    localStorage.setItem("authify-selected-scope", selectedScope.value || '');
-    console.log("Saved selected scope to localStorage:", selectedScope.value || '');
-  } catch (error) {
-    console.warn("Could not save selected scope to localStorage:", error);
-  }
+  await storage.saveSelectedScope(selectedScope.value || '');
 };
 
 // Clear stored scope from storage
 const clearStoredScope = async () => {
-  try {
-    localStorage.removeItem("authify-selected-scope");
-    console.log("Cleared stored scope from localStorage");
-  } catch (error) {
-    console.warn("Could not clear stored scope from localStorage:", error);
-  }
+  await storage.clearSelectedScope();
 };
 
 onMounted(async () => {
@@ -235,11 +197,8 @@ onMounted(async () => {
   // Load filter settings
   void loadFilterSettings();
   
-  // Load auth headers from storage
-  void loadAuthHeaders();
-  
-  // Load JSON prettification setting from storage
-  void loadJsonPrettifySetting();
+  // Load all settings from storage at once
+  void loadAllSettings();
   
   // Start polling backend for traffic data
   const tick = async () => {
@@ -295,6 +254,7 @@ onBeforeUnmount(() => {
   }
 });
 
+
 // Watch for toggle button changes and notify backend
 watch(isEnabled, async (newValue) => {
   const result = await sdk.backend.setPluginEnabled(newValue);
@@ -321,7 +281,7 @@ watch(selectedScope, async (newScope) => {
     rows.value = [];
     selected.value = undefined;
     
-    // Save the new scope to localStorage
+    // Save the new scope to storage
     saveSelectedScope();
   }
 });
@@ -357,7 +317,6 @@ watch(showModified, () => {
 // Watch for JSON prettification toggle changes and update editors
 watch(enableJsonPrettify, () => {
   void updateEditors();
-  saveJsonPrettifySetting();
 });
 
 // Function to save auth headers to backend and storage
@@ -370,12 +329,7 @@ const saveAuthHeaders = async () => {
   }
   
   // Save to storage for persistence
-  try {
-    localStorage.setItem("authify-auth-headers", auth.value);
-    console.log("Saved auth headers to localStorage");
-  } catch (error) {
-    console.warn("Could not save auth headers to localStorage:", error);
-  }
+  await storage.saveAuthHeaders(auth.value);
 };
 
 // Auto-save auth headers when user types (with debouncing)
@@ -484,7 +438,7 @@ const loadWorkspaceScopes = async () => {
     ];
     
     // Restore previously selected scope from storage, or default to "Unset Scope"
-    const storedScope = localStorage.getItem("authify-selected-scope");
+    const storedScope = await storage.loadSelectedScope();
     if (storedScope !== null) {
       // Verify the stored scope still exists in the available scopes
       const scopeExists = workspaceScopes.value.some(scope => scope.value === storedScope);
