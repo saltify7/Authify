@@ -98,7 +98,7 @@ const updateTrafficHeight = () => {
   // Get the window height
   const windowHeight = window.innerHeight;
   
-  const reservedHeight = 170;
+  const reservedHeight = 175;
   
   // Set the traffic height to available space
   const availableHeight = Math.max(windowHeight - reservedHeight, 400); // Minimum 400px
@@ -619,7 +619,7 @@ const handleGlobalKeydown = (event: KeyboardEvent) => {
 </script>
 
 <template>
-  <div class="h-full w-full flex flex-col">
+  <div class="h-full w-full flex flex-col overflow-auto">
     <!-- Header with toggle button -->
     <div class="flex items-center justify-between p-3 border-b border-surface-700 bg-surface-800">
       <div class="flex items-center gap-4">

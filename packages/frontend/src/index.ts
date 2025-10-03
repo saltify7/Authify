@@ -41,23 +41,6 @@ export const init = (sdk: FrontendSDK) => {
     body: root,
   });
 
-  // Ensure all ancestor containers fill and don't scroll the page
-  setTimeout(() => {
-    let depth = 0;
-    let el: HTMLElement | null = root.parentElement;
-    while (el && depth < 4) {
-      Object.assign(el.style, {
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        minHeight: "0",
-        overflow: "hidden",
-      });
-      el = el.parentElement;
-      depth += 1;
-    }
-  }, 0);
-
   // Add a sidebar item
   sdk.sidebar.registerItem("Authify", "/Authify", {
     icon: "fas fa-shield-alt"
