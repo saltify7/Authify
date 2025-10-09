@@ -1,4 +1,4 @@
-import type { DefineAPI, SDK } from "caido:plugin";
+import type { DefineAPI, DefineEvents, SDK } from "caido:plugin";
 import { getFilterSettings, setFilterSettings, shouldFilterRequest, isPluginGeneratedRequest } from "./filter";
 import { saveAuthHeaders, getAuthHeaders, getStoredAuthHeaders, sendHeadersToAuthify, applyHeadersToReplay } from "./auth-headers";
 import { setSelectedScope, getSelectedScope, refreshScopes, getSelectedScopeInternal, setSelectedScopeInternal } from "./scopes";
@@ -8,6 +8,12 @@ import { getResponseContentLength, compareResponses } from "./utils";
 export type Result<T> =
   | { kind: "Error"; error: string }
   | { kind: "Ok"; value: T };
+
+// Events sent from backend to frontend
+export type BackendEvents = DefineEvents<{
+  // Emitted whenever capturedTraffic changes (add/update/clear)
+  tableChanged: (rows: Array<Row>) => void;
+}>;
 
 // Simplified row type mirrored by frontend
 type Row = {
@@ -175,7 +181,7 @@ const sendToReplay = async (sdk: SDK, requestId: string, useModified: boolean): 
 };
 
 // Process a request from HTTP history (context menu action)
-const processRequestFromHistory = async (sdk: SDK, requestId: string): Promise<Result<void>> => {
+const processRequestFromHistory = async (sdk: SDK<API, BackendEvents>, requestId: string): Promise<Result<void>> => {
   try {
     // Get the request directly using the request ID
     const requestResponse = await sdk.requests.get(requestId.toString());
@@ -259,6 +265,9 @@ const processRequestFromHistory = async (sdk: SDK, requestId: string): Promise<R
     // Mark this request as modified
     modifiedRequestIds.add(id);
 
+    // Notify frontend that table changed
+    sdk.api.send("tableChanged", capturedTraffic);
+
     sdk.console.log(`Successfully processed request from HTTP history: ${request.getMethod()} ${request.getPath()}`);
     return { kind: "Ok", value: undefined };
 
@@ -271,7 +280,7 @@ const processRequestFromHistory = async (sdk: SDK, requestId: string): Promise<R
 // REQUEST PROCESSING
 
 // Event-driven request processing using onInterceptResponse
-const handleInterceptedResponse = async (sdk: SDK, request: any, response: any): Promise<void> => {
+const handleInterceptedResponse = async (sdk: SDK<API, BackendEvents>, request: any, response: any): Promise<void> => {
   try {
     // Only process if plugin is enabled
     if (!isPluginEnabled) {
@@ -288,6 +297,9 @@ const handleInterceptedResponse = async (sdk: SDK, request: any, response: any):
       if (capturedTraffic.length > 500) {
         capturedTraffic = capturedTraffic.slice(0, 500);
       }
+      
+      // Notify frontend that table changed
+      sdk.api.send("tableChanged", capturedTraffic);
       
       sdk.console.log(`Processed intercepted request: ${request.getMethod()} ${request.getUrl()}`);
     }
@@ -394,7 +406,12 @@ const processNewRequest = async (sdk: SDK, req: any, resp: any): Promise<Row | n
 };
 
 // Function to process pending responses in bulk
-const processPendingResponses = async (sdk: SDK): Promise<void> => {
+const processPendingResponses = async (sdk: SDK<API, BackendEvents>): Promise<void> => {
+  // Only process if plugin is enabled
+  if (!isPluginEnabled) {
+    return;
+  }
+
   if (pendingResponseQueue.size === 0) {
     return;
   }
@@ -469,11 +486,13 @@ const processPendingResponses = async (sdk: SDK): Promise<void> => {
 
   if (updatedIds.size > 0) {
     sdk.console.log(`Successfully updated ${updatedIds.size} responses`);
+    // Notify frontend that table changed
+    sdk.api.send("tableChanged", capturedTraffic);
   }
 };
 
 // Function to modify request with auth headers and resend
-const modifyAndResendRequest = async (sdk: SDK, originalReqRaw: string, originalRespRaw: string): Promise<{ code: number; length: number; modifiedReqRaw: string; modifiedRespRaw: string; comparison: "same" | "different" | "similar" | "unknown" }> => {
+const modifyAndResendRequest = async (sdk: SDK<API, BackendEvents>, originalReqRaw: string, originalRespRaw: string): Promise<{ code: number; length: number; modifiedReqRaw: string; modifiedRespRaw: string; comparison: "same" | "different" | "similar" | "unknown" }> => {
   try {
     if (!getStoredAuthHeaders().trim()) {
       sdk.console.log("No auth headers stored, skipping modification");
@@ -643,7 +662,7 @@ const modifyAndResendRequest = async (sdk: SDK, originalReqRaw: string, original
 // RUNNING LOGIC
 
 // Get current traffic - now just returns captured traffic since we use event-driven processing
-const getTraffic = async (sdk: SDK): Promise<Result<Array<Row>>> => {
+const getTraffic = async (sdk: SDK<API, BackendEvents>): Promise<Result<Array<Row>>> => {
   try {
     return { kind: "Ok", value: capturedTraffic };
   } catch (error) {
@@ -653,20 +672,20 @@ const getTraffic = async (sdk: SDK): Promise<Result<Array<Row>>> => {
 };
 
 // Start background response processing
-const startResponseProcessing = (sdk: SDK): void => {
+const startResponseProcessing = (sdk: SDK<API, BackendEvents>): void => {
   if (responseUpdateInterval !== undefined) {
     return; // Already running
   }
   
   responseUpdateInterval = (globalThis as any).setInterval(async () => {
     await processPendingResponses(sdk);
-  }, 3000);
+  }, 1000);
   
-  sdk.console.log("Started background response processing (every 2 seconds)");
+  sdk.console.log("Started background response processing (every second)");
 };
 
 // Stop background response processing
-const stopResponseProcessing = (sdk: SDK): void => {
+const stopResponseProcessing = (sdk: SDK<API, BackendEvents>): void => {
   if (responseUpdateInterval !== undefined) {
     (globalThis as any).clearInterval(responseUpdateInterval);
     responseUpdateInterval = undefined;
@@ -675,7 +694,7 @@ const stopResponseProcessing = (sdk: SDK): void => {
 };
 
 // Set plugin enabled state
-const setPluginEnabled = async (sdk: SDK, enabled: boolean): Promise<Result<void>> => {
+const setPluginEnabled = async (sdk: SDK<API, BackendEvents>, enabled: boolean): Promise<Result<void>> => {
   try {
     if (enabled && !isPluginEnabled) {
       // Plugin is being turned ON - set lastProcessedRequestId to most recent request
@@ -726,7 +745,7 @@ const setPluginEnabled = async (sdk: SDK, enabled: boolean): Promise<Result<void
 };
 
 // Clear traffic table
-const clearTraffic = async (sdk: SDK): Promise<Result<void>> => {
+const clearTraffic = async (sdk: SDK<API, BackendEvents>): Promise<Result<void>> => {
   try {
     // Get the most recent request ID and set it as the last processed request
     const query = sdk.requests
@@ -749,6 +768,8 @@ const clearTraffic = async (sdk: SDK): Promise<Result<void>> => {
     
     capturedTraffic = [];
     pendingResponseQueue.clear();
+    // Notify frontend that table changed (now empty)
+    sdk.api.send("tableChanged", capturedTraffic);
     sdk.console.log("Cleared traffic table and response queue");
     return { kind: "Ok", value: undefined };
   } catch (error) {
@@ -777,7 +798,7 @@ export type API = DefineAPI<{
   applyHeadersToReplay: typeof applyHeadersToReplay;
 }>;
 
-export async function init(sdk: SDK<API>) {
+export async function init(sdk: SDK<API, BackendEvents>) {
   sdk.api.register("getTraffic", getTraffic);
   sdk.api.register("setPluginEnabled", setPluginEnabled);
   sdk.api.register("saveAuthHeaders", saveAuthHeaders);
@@ -808,6 +829,9 @@ export async function init(sdk: SDK<API>) {
     capturedTraffic = [];
     pendingResponseQueue.clear();
     modifiedRequestIds.clear();
+    refreshScopes(sdk);
+    // Notify frontend that table changed (now empty)
+    sdk.api.send("tableChanged", capturedTraffic);
     
     // Reset selected scope to default
     setSelectedScopeInternal("");

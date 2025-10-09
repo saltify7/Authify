@@ -90,7 +90,6 @@ const selected = ref<Row | undefined>(undefined);
 const activeTabIndex = ref(0);
 
 
-let poll: number | undefined = undefined;
 let resizeObserver: ResizeObserver | undefined = undefined;
 
 // Function to calculate and set the traffic container height
@@ -200,19 +199,16 @@ onMounted(async () => {
   // Load all settings from storage at once
   void loadAllSettings();
   
-  // Start polling backend for traffic data
-  const tick = async () => {
-    const result = await sdk.backend.getTraffic();
-    if (result.kind === "Ok") {
-      rows.value = result.value;
-    } else {
-      sdk.window.showToast(`Error fetching traffic: ${result.error}`, { variant: "error" });
-    }
-  };
-  void tick();
-  poll = window.setInterval(() => {
-    void tick();
-  }, 2000); // Poll every 2 seconds for updates
+  // Seed once on mount
+  const initial = await sdk.backend.getTraffic();
+  if (initial.kind === "Ok") {
+    rows.value = initial.value;
+  }
+  
+  // Listen for backend table changes
+  sdk.backend.onEvent("tableChanged", (traffic) => {
+    rows.value = traffic as unknown as Row[];
+  });
   
   // Set initial traffic height
   updateTrafficHeight();
@@ -237,8 +233,6 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
-  if (poll !== undefined) window.clearInterval(poll);
-  
   // Clean up resize listener
   window.removeEventListener('resize', updateTrafficHeight);
   
@@ -606,6 +600,13 @@ const handleTableKeydown = (event: KeyboardEvent) => {
 
 // Function to handle global keyboard shortcuts
 const handleGlobalKeydown = (event: KeyboardEvent) => {
+  // Only react if Caido window is focused and visible
+  if (!document.hasFocus() || document.visibilityState !== 'visible') return;
+
+  // Only react if our plugin panel is present and visible
+  const panel = document.querySelector('#plugin--authify') as HTMLElement | null;
+  if (!panel || panel.offsetParent === null) return;
+
   // Check if CTRL+R is pressed and we're in the Traffic tab with a selected row
   if (event.ctrlKey && event.key === 'r' && activeTabIndex.value === 1 && selected.value) {
     event.preventDefault();
@@ -907,17 +908,6 @@ X-CSRF-Token: def456"
                     }"
                   />
                   <Column
-                    field="length"
-                    header="Length"
-                    style="width: 50px"
-                    :pt="{
-                      headerCell: { style: 'min-width: 0; width: 50px; max-width: 50px; padding: 0 6px' },
-                      headerCellContent: { style: 'min-width: 0; width: 100%; max-width: 50px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;' },
-                      bodyCell: { style: 'min-width: 0; width: 50px; max-width: 50px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px' },
-                      bodyCellContent: { style: 'min-width: 0; width: 100%; max-width: 50px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;' }
-                    }"
-                  />
-                  <Column
                     field="modifiedCode"
                     header="M. Status"
                     style="width: 40px"
@@ -926,6 +916,17 @@ X-CSRF-Token: def456"
                       headerCellContent: { style: 'min-width: 0; width: 100%; max-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;' },
                       bodyCell: { style: 'min-width: 0; width: 40px; max-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px' },
                       bodyCellContent: { style: 'min-width: 0; width: 100%; max-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;' }
+                    }"
+                  />
+                  <Column
+                    field="length"
+                    header="Length"
+                    style="width: 50px"
+                    :pt="{
+                      headerCell: { style: 'min-width: 0; width: 50px; max-width: 50px; padding: 0 6px' },
+                      headerCellContent: { style: 'min-width: 0; width: 100%; max-width: 50px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;' },
+                      bodyCell: { style: 'min-width: 0; width: 50px; max-width: 50px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px' },
+                      bodyCellContent: { style: 'min-width: 0; width: 100%; max-width: 50px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;' }
                     }"
                   />
                   <Column
