@@ -1,7 +1,7 @@
 import type { DefineAPI, DefineEvents, SDK } from "caido:plugin";
 import { getFilterSettings, setFilterSettings, shouldFilterRequest, isPluginGeneratedRequest } from "./filter";
 import { saveAuthHeaders, getAuthHeaders, getStoredAuthHeaders, sendHeadersToAuthify, applyHeadersToReplay } from "./auth-headers";
-import { setSelectedScope, getSelectedScope, refreshScopes, getSelectedScopeInternal, setSelectedScopeInternal } from "./scopes";
+import { setSelectedScope, getSelectedScope, getSelectedScopeInternal, setSelectedScopeInternal, isUrlInScope } from "./scopes";
 import { getResponseContentLength, compareResponses } from "./utils";
 
 // Result type for safe error handling between backend and frontend
@@ -13,6 +13,7 @@ export type Result<T> =
 export type BackendEvents = DefineEvents<{
   // Emitted whenever capturedTraffic changes (add/update/clear)
   tableChanged: (rows: Array<Row>) => void;
+  projectChanged: (projectName: string) => void;
 }>;
 
 // Simplified row type mirrored by frontend
@@ -330,7 +331,9 @@ const processNewRequest = async (sdk: SDK, req: any, resp: any): Promise<Row | n
   // Check if request is in the selected scope
   if (getSelectedScopeInternal() && getSelectedScopeInternal().trim() !== "") {
     try {
-      const isInScope = sdk.requests.inScope(req);
+      //const isInScope = sdk.requests.inScope(req);
+      const isInScope = isUrlInScope(sdk, url);
+      sdk.console.log(`isInScope: ${isInScope} : ${url}`);
       if (!isInScope) {
         sdk.console.log(`Skipping request - URL ${url} not in scope ${getSelectedScopeInternal()}`);
         return null;
@@ -778,6 +781,25 @@ const clearTraffic = async (sdk: SDK<API, BackendEvents>): Promise<Result<void>>
   }
 };
 
+// Get current project ID
+const getCurrentProjectId = async (sdk: SDK<API, BackendEvents>): Promise<Result<string>> => {
+  try {
+    // Primary method: use projects API to get current project
+    const project = await sdk.projects.getCurrent();
+    if (project && typeof project.getId === 'function') {
+      const projectId = await project.getId();
+      sdk.console.log(`Current project ID: ${projectId}`);
+      return { kind: "Ok", value: projectId };
+    }
+
+    // If no project/workspace ID available, return error
+    return { kind: "Error", error: "No project or workspace ID available" };
+  } catch (error) {
+    sdk.console.log(`Error getting current project ID: ${error}`);
+    return { kind: "Error", error: `Failed to get current project ID: ${error}` };
+  }
+};
+
 // API SPECIFICATION
 
 export type API = DefineAPI<{
@@ -789,13 +811,14 @@ export type API = DefineAPI<{
   clearTraffic: typeof clearTraffic;
   setSelectedScope: typeof setSelectedScope;
   getSelectedScope: typeof getSelectedScope;
+  isUrlInScope: typeof isUrlInScope;
   sendToReplay: typeof sendToReplay;
   getFilterSettings: typeof getFilterSettings;
   setFilterSettings: typeof setFilterSettings;
   processRequestFromHistory: typeof processRequestFromHistory;
   sendHeadersToAuthify: typeof sendHeadersToAuthify;
-  refreshScopes: typeof refreshScopes;
   applyHeadersToReplay: typeof applyHeadersToReplay;
+  getCurrentProjectId: typeof getCurrentProjectId;
 }>;
 
 export async function init(sdk: SDK<API, BackendEvents>) {
@@ -807,13 +830,14 @@ export async function init(sdk: SDK<API, BackendEvents>) {
   sdk.api.register("clearTraffic", clearTraffic);
   sdk.api.register("setSelectedScope", setSelectedScope);
   sdk.api.register("getSelectedScope", getSelectedScope);
+  sdk.api.register("isUrlInScope", isUrlInScope);
   sdk.api.register("sendToReplay", sendToReplay);
   sdk.api.register("getFilterSettings", getFilterSettings);
   sdk.api.register("setFilterSettings", setFilterSettings);
   sdk.api.register("processRequestFromHistory", processRequestFromHistory);
   sdk.api.register("sendHeadersToAuthify", sendHeadersToAuthify);
-  sdk.api.register("refreshScopes", refreshScopes);
   sdk.api.register("applyHeadersToReplay", applyHeadersToReplay);
+  sdk.api.register("getCurrentProjectId", getCurrentProjectId);
 
   // Register event listener for intercepted responses (event-driven approach)
   sdk.events.onInterceptResponse(async (sdk, request, response) => {
@@ -829,9 +853,9 @@ export async function init(sdk: SDK<API, BackendEvents>) {
     capturedTraffic = [];
     pendingResponseQueue.clear();
     modifiedRequestIds.clear();
-    refreshScopes(sdk);
     // Notify frontend that table changed (now empty)
     sdk.api.send("tableChanged", capturedTraffic);
+    sdk.api.send("projectChanged", newProjectName);
     
     // Reset selected scope to default
     setSelectedScopeInternal("");

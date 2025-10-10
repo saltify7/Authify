@@ -5,6 +5,7 @@ import { JSONCompatible } from "@caido/sdk-frontend/src/types/utils";
 interface AuthifyStorage {
   "authify-auth-headers"?: string;
   "authify-selected-scope"?: string;
+  "authify-project-scopes"?: Array<[string, string]>; // Array of [projectId, scopeId] tuples
 }
 
 // Storage utility functions using Caido SDK storage API
@@ -59,31 +60,51 @@ export class StorageManager {
     return null;
   }
 
-  // Save selected scope to storage
-  async saveSelectedScope(scope: string): Promise<void> {
+  // Save selected scope to storage (project-specific)
+  async saveSelectedScope(scope: string, projectId: string): Promise<void> {
     const currentStorage = await this.getAllStorage();
-    currentStorage["authify-selected-scope"] = scope;
+    
+    // Initialize project-scopes array if it doesn't exist
+    if (!currentStorage["authify-project-scopes"]) {
+      currentStorage["authify-project-scopes"] = [];
+    }
+    
+    // Check if project ID exists and overwrite, otherwise add new tuple
+    const existingIndex = currentStorage["authify-project-scopes"].findIndex(([pid]) => pid === projectId);
+    if (existingIndex !== -1) {
+      currentStorage["authify-project-scopes"][existingIndex] = [projectId, scope];
+    } else {
+      currentStorage["authify-project-scopes"].push([projectId, scope]);
+    }
+    
     await this.saveAllStorage(currentStorage);
-    console.log("Saved selected scope to sdk.storage:", scope);
+    console.log(`Saved scope ${scope} for project ${projectId}`);
   }
 
-  // Load selected scope from storage
-  async loadSelectedScope(): Promise<string | null> {
+  // Load selected scope from storage (project-specific)
+  async loadSelectedScope(projectId: string): Promise<string | null> {
     const storage = await this.getAllStorage();
-    const scope = storage["authify-selected-scope"];
-    if (scope && typeof scope === 'string') {
-      console.log("Loaded selected scope from sdk.storage:", scope);
-      return scope;
+    const projectScopes = storage["authify-project-scopes"];
+    
+    if (projectScopes && Array.isArray(projectScopes)) {
+      const tuple = projectScopes.find(([pid]) => pid === projectId);
+      if (tuple && tuple[1]) {
+        console.log(`Loaded scope ${tuple[1]} for project ${projectId}`);
+        return tuple[1];
+      }
     }
     return null;
   }
 
-  // Clear selected scope from storage
-  async clearSelectedScope(): Promise<void> {
+  // Clear selected scope from storage (project-specific)
+  async clearSelectedScope(projectId: string): Promise<void> {
     const currentStorage = await this.getAllStorage();
-    delete currentStorage["authify-selected-scope"];
-    await this.saveAllStorage(currentStorage);
-    console.log("Cleared selected scope from sdk.storage");
+    
+    if (currentStorage["authify-project-scopes"]) {
+      currentStorage["authify-project-scopes"] = currentStorage["authify-project-scopes"].filter(([pid]) => pid !== projectId);
+      await this.saveAllStorage(currentStorage);
+      console.log(`Cleared scope for project ${projectId}`);
+    }
   }
 
   // Remove a key from storage

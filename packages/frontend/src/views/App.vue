@@ -14,12 +14,16 @@ import Dropdown from "primevue/dropdown";
 import { useSDK } from "@/plugins/sdk";
 import { prettifyHttpData } from "@/utils/json-prettify";
 import { StorageManager } from "@/utils/storage";
+import { ScopesManager } from "@/scopes";
 
 // SDK instance
 const sdk = useSDK();
 
 // Storage manager instance
 const storage = new StorageManager(sdk);
+
+// Scopes manager instance
+const scopesManager = new ScopesManager(sdk, storage);
 
 // Caido request/response editors
 const reqEditor = ref<any>(null);
@@ -42,9 +46,9 @@ const enableJsonPrettify = ref(true);
 // Dynamic height for traffic container
 const trafficHeight = ref(600);
 
-// Workspace scopes state
-const workspaceScopes = ref<Array<{label: string, value: string}>>([]);
-const selectedScope = ref<string | undefined>(undefined);
+// Workspace scopes state is now managed by scopesManager
+const workspaceScopes = scopesManager.workspaceScopes;
+const selectedScope = scopesManager.selectedScope;
 
 // Filter settings state - individual refs for better reactivity
 const ignoreStyling = ref(true);
@@ -116,33 +120,10 @@ const handleAuthHeadersUpdate = async (event: CustomEvent) => {
 
 // Function to refresh scopes (can be called manually or on project change)
 const refreshScopes = async () => {
-  console.log("Refreshing scopes");
-  try {
-    // Store the current selected scope before refreshing
-    const currentScope = selectedScope.value;
-    
-    // Refresh scopes from the backend
-    const result = await sdk.backend.refreshScopes();
-    if (result.kind === "Error") {
-      console.warn("Failed to refresh scopes:", result.error);
-    }
-    
-    // Reload workspace scopes
-    await loadWorkspaceScopes();
-    
-    // If the previously selected scope no longer exists, clear it from storage
-    if (currentScope && currentScope !== selectedScope.value) {
-      await clearStoredScope();
-      console.log("Cleared stored scope because it no longer exists");
-    }
-    
-    // Clear existing traffic when scopes are refreshed to avoid confusion
+  const result = await scopesManager.refreshScopes();
+  if (result?.shouldClearTraffic) {
     rows.value = [];
     selected.value = undefined;
-    
-  } catch (error) {
-    console.warn("Error refreshing scopes:", error);
-    sdk.window.showToast("Failed to refresh scopes", { variant: "error" });
   }
 };
 
@@ -157,16 +138,6 @@ const loadAllSettings = async () => {
   
   // Note: selected scope is loaded separately in loadWorkspaceScopes()
   // because it depends on the available scopes being loaded first
-};
-
-// Save selected scope to storage
-const saveSelectedScope = async () => {
-  await storage.saveSelectedScope(selectedScope.value || '');
-};
-
-// Clear stored scope from storage
-const clearStoredScope = async () => {
-  await storage.clearSelectedScope();
 };
 
 onMounted(async () => {
@@ -191,7 +162,10 @@ onMounted(async () => {
   }
   
   // Load workspace scopes
-  void loadWorkspaceScopes();
+  void scopesManager.loadWorkspaceScopes();
+  
+  // Start auto-refresh scopes every 5 seconds
+  autoRefreshScopes();
   
   // Load filter settings
   void loadFilterSettings();
@@ -208,6 +182,10 @@ onMounted(async () => {
   // Listen for backend table changes
   sdk.backend.onEvent("tableChanged", (traffic) => {
     rows.value = traffic as unknown as Row[];
+  });
+
+  sdk.backend.onEvent("projectChanged", (projectName) => {
+    refreshScopes();
   });
   
   // Set initial traffic height
@@ -242,6 +220,11 @@ onBeforeUnmount(() => {
   // Clean up keyboard shortcut listener
   window.removeEventListener('keydown', handleGlobalKeydown);
   
+  // Clean up scope refresh timeout
+  if (scopeRefreshTimeout !== undefined) {
+    clearTimeout(scopeRefreshTimeout);
+  }
+  
   // Clean up ResizeObserver
   if (resizeObserver !== undefined) {
     resizeObserver.disconnect();
@@ -267,17 +250,7 @@ watch(isEnabled, async (newValue) => {
 
 // Watch for scope changes and notify backend
 watch(selectedScope, async (newScope) => {
-  const result = await sdk.backend.setSelectedScope(newScope || '');
-  if (result.kind === "Error") {
-    sdk.window.showToast(`Failed to set scope: ${result.error}`, { variant: "error" });
-  } else {
-    // Clear existing traffic when scope changes to avoid confusion
-    rows.value = [];
-    selected.value = undefined;
-    
-    // Save the new scope to storage
-    saveSelectedScope();
-  }
+  await scopesManager.handleScopeChange(newScope, rows, selected);
 });
 
 // Watch for filter settings changes and notify backend
@@ -338,6 +311,23 @@ const autoSaveAuthHeaders = () => {
   authSaveTimeout = setTimeout(async () => {
     await saveAuthHeaders();
   }, 500);
+};
+
+// Auto-refresh scopes every 5 seconds
+let scopeRefreshTimeout: ReturnType<typeof setTimeout> | undefined = undefined;
+const autoRefreshScopes = () => {
+  // Clear existing timeout
+  if (scopeRefreshTimeout !== undefined) {
+    clearTimeout(scopeRefreshTimeout);
+  }
+  
+  // Set new timeout to refresh after 5 seconds
+  scopeRefreshTimeout = setTimeout(async () => {
+    await scopesManager.refreshScopes();
+    await scopesManager.handleScopeChange(selectedScope.value, rows, selected);
+    // Schedule next refresh
+    autoRefreshScopes();
+  }, 5000);
 };
 
 // How to Use tab data and handlers
@@ -413,48 +403,6 @@ const sendToReplay = async () => {
     const requestType = showModified.value ? "modified" : "original";
     sdk.window.showToast(`Sent ${requestType} request to replay`, { variant: "success" });
     sdk.replay.openTab(result.value.id);
-  }
-};
-
-// Function to load workspace scopes
-const loadWorkspaceScopes = async () => {
-  try {
-    // Get workspace scopes from Caido SDK
-    const scopes = await sdk.scopes?.getScopes?.() || [];
-    
-    // Add "Unset Scope" as the first option
-    workspaceScopes.value = [
-      { label: 'Unset Scope', value: '' },
-      ...scopes.map((scope: any) => ({
-        label: scope.name || scope.id || scope,
-        value: scope.id || scope
-      }))
-    ];
-    
-    // Restore previously selected scope from storage, or default to "Unset Scope"
-    const storedScope = await storage.loadSelectedScope();
-    if (storedScope !== null) {
-      // Verify the stored scope still exists in the available scopes
-      const scopeExists = workspaceScopes.value.some(scope => scope.value === storedScope);
-      if (scopeExists) {
-        selectedScope.value = storedScope;
-        console.log("Restored previously selected scope:", storedScope);
-      } else {
-        // Stored scope no longer exists, default to "Unset Scope"
-        selectedScope.value = '';
-        console.log("Previously selected scope no longer exists, defaulting to 'Unset Scope'");
-        sdk.window.showToast("Previously selected scope no longer available", { variant: "warning" });
-      }
-    } else {
-      // No stored scope, default to "Unset Scope"
-      selectedScope.value = '';
-    }
-  } catch (error) {
-    console.warn('Could not load workspace scopes:', error);
-    sdk.window.showToast('Could not load workspace scopes', { variant: "error" });
-    // Fallback to "Unset Scope"
-    workspaceScopes.value = [{ label: 'Unset Scope', value: '' }];
-    selectedScope.value = '';
   }
 };
 
