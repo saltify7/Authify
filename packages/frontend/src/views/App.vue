@@ -14,7 +14,9 @@ import Dropdown from "primevue/dropdown";
 import { useSDK } from "@/plugins/sdk";
 import { prettifyHttpData } from "@/utils/json-prettify";
 import { StorageManager } from "@/utils/storage";
-import { ScopesManager } from "@/scopes";
+import { ScopesManager } from "@/configs/scopes";
+import { AuthConfigManager } from "@/configs/auth-config";
+import { MatchReplaceManager, type MatchReplaceRule } from "@/configs/match-replace";
 
 // SDK instance
 const sdk = useSDK();
@@ -25,14 +27,23 @@ const storage = new StorageManager(sdk);
 // Scopes manager instance
 const scopesManager = new ScopesManager(sdk, storage);
 
+// Auth config manager instance
+const authConfigManager = new AuthConfigManager(sdk, storage);
+
+// Match & Replace manager instance
+const matchReplaceManager = new MatchReplaceManager(sdk, storage);
+
 // Caido request/response editors
 const reqEditor = ref<any>(null);
 const respEditor = ref<any>(null);
 const reqEditorElement = ref<HTMLElement | null>(null);
 const respEditorElement = ref<HTMLElement | null>(null);
 
-// Pane 1 state: user-provided auth materials
-const auth = ref("");
+// Auth config state is now managed by authConfigManager
+const auth = authConfigManager.authHeaders;
+
+// Match & Replace rules state
+const matchReplaceRules = ref<MatchReplaceRule[]>([]);
 
 // Plugin state: on/off toggle
 const isEnabled = ref(false);
@@ -113,8 +124,8 @@ const handleAuthHeadersUpdate = async (event: CustomEvent) => {
   if (event.detail && event.detail.headers) {
     auth.value = event.detail.headers;
     
-    // Save to storage for persistence
-    await storage.saveAuthHeaders(event.detail.headers);
+    // Save to storage for persistence using AuthConfigManager
+    await authConfigManager.handleAuthHeadersChange(event.detail.headers);
   }
 };
 
@@ -129,11 +140,26 @@ const refreshScopes = async () => {
 
 // Load all settings from storage at once
 const loadAllSettings = async () => {
-  const settings = await storage.loadAllSettings();
+  // Load project-specific auth config
+  await authConfigManager.loadProjectAuthConfig();
   
-  // Load auth headers
-  if (settings.authHeaders) {
-    auth.value = settings.authHeaders;
+  // Load project-specific match & replace rules
+  const loadedRules = await matchReplaceManager.loadProjectMatchReplaceRules();
+  matchReplaceRules.value = loadedRules;
+  
+  // Send loaded rules to backend for processing
+  if (loadedRules.length > 0) {
+    try {
+      const result = await sdk.backend.saveMatchReplaceRules(loadedRules);
+      if (result.kind === "Error") {
+        sdk.window.showToast(`Failed to sync match & replace rules to backend: ${result.error}`, { variant: "error" });
+      } else {
+        console.log("Synced project match & replace rules to backend on load");
+      }
+    } catch (error) {
+      console.warn("Error syncing match & replace rules to backend on load:", error);
+      sdk.window.showToast("Failed to sync match & replace rules to backend", { variant: "error" });
+    }
   }
   
   // Note: selected scope is loaded separately in loadWorkspaceScopes()
@@ -184,8 +210,38 @@ onMounted(async () => {
     rows.value = traffic as unknown as Row[];
   });
 
-  sdk.backend.onEvent("projectChanged", (projectName) => {
-    refreshScopes();
+  sdk.backend.onEvent("projectChanged", async (projectName) => {
+    // Refresh scopes, auth config, and match & replace rules on project change
+    const [scopesResult, authResult, matchReplaceResult] = await Promise.all([
+      refreshScopes(),
+      authConfigManager.refreshAuthConfig(),
+      matchReplaceManager.refreshMatchReplaceRules()
+    ]);
+    
+    // Load project-specific match & replace rules
+    const loadedRules = await matchReplaceManager.loadProjectMatchReplaceRules();
+    matchReplaceRules.value = loadedRules;
+    
+    // Send loaded rules to backend for processing
+    if (loadedRules.length > 0) {
+      try {
+        const result = await sdk.backend.saveMatchReplaceRules(loadedRules);
+        if (result.kind === "Error") {
+          sdk.window.showToast(`Failed to sync match & replace rules to backend: ${result.error}`, { variant: "error" });
+        } else {
+          console.log("Synced project match & replace rules to backend");
+        }
+      } catch (error) {
+        console.warn("Error syncing match & replace rules to backend:", error);
+        sdk.window.showToast("Failed to sync match & replace rules to backend", { variant: "error" });
+      }
+    }
+    
+    // Clear traffic if any configuration changed
+    if ((scopesResult as any)?.shouldClearTraffic || (authResult as any)?.shouldClearTraffic || (matchReplaceResult as any)?.shouldClearTraffic) {
+      rows.value = [];
+      selected.value = undefined;
+    }
   });
   
   // Set initial traffic height
@@ -229,6 +285,9 @@ onBeforeUnmount(() => {
   if (resizeObserver !== undefined) {
     resizeObserver.disconnect();
   }
+  
+  // Clean up match replace manager
+  matchReplaceManager.destroy();
 });
 
 
@@ -288,15 +347,7 @@ watch(enableJsonPrettify, () => {
 
 // Function to save auth headers to backend and storage
 const saveAuthHeaders = async () => {
-  // Save to backend
-  const result = await sdk.backend.saveAuthHeaders(auth.value);
-  if (result.kind === "Error") {
-    sdk.window.showToast(`Failed to save auth headers: ${result.error}`, { variant: "error" });
-    return;
-  }
-  
-  // Save to storage for persistence
-  await storage.saveAuthHeaders(auth.value);
+  await authConfigManager.handleAuthHeadersChange(auth.value);
 };
 
 // Auto-save auth headers when user types (with debouncing)
@@ -311,6 +362,23 @@ const autoSaveAuthHeaders = () => {
   authSaveTimeout = setTimeout(async () => {
     await saveAuthHeaders();
   }, 500);
+};
+
+// Match & Replace functions (delegated to manager)
+const addMatchReplaceRule = () => {
+  matchReplaceManager.addMatchReplaceRule(matchReplaceRules);
+};
+
+const removeMatchReplaceRule = (id: string) => {
+  matchReplaceManager.removeMatchReplaceRule(matchReplaceRules, id);
+};
+
+const toggleMatchReplaceRule = (id: string) => {
+  matchReplaceManager.toggleMatchReplaceRule(matchReplaceRules, id);
+};
+
+const updateMatchReplaceRule = (id: string, field: 'match' | 'replace', value: string) => {
+  matchReplaceManager.updateMatchReplaceRule(matchReplaceRules, id, field, value);
 };
 
 // Auto-refresh scopes every 5 seconds
@@ -334,6 +402,7 @@ const autoRefreshScopes = () => {
 const configOptions = [
   { label: "Authentication Headers", value: "auth-headers" },
   { label: "Scope Selection", value: "scope-selection" },
+  { label: "Match & Replace", value: "match-replace" },
   { label: "Request Filters", value: "request-filters" }
 ];
 
@@ -353,6 +422,7 @@ const onConfigSelect = () => {
   const configs: Record<string, string> = {
     "auth-headers": "Configure your authentication headers in the textarea. Paste headers one per line in the format 'Header-Name: value'. These headers will be automatically added to requests when the plugin is enabled. Headers are auto-saved as you type and persist between sessions.",
     "scope-selection": "Set a workspace scope to focus on specific domains or applications. You can select any scope from the workspace. Use 'Unset Scope' to process all HTTP traffic (though this might slow down the plugin).",
+    "match-replace": "Configure automatic string replacements in the body of replayed requests and enable/disable them individually. Useful for replacing CSRF tokens or other values in the request body.",
     "request-filters": "Enable filters to reduce noise in your traffic view. Ignore styling files (CSS, SCSS), JavaScript files, images, and OPTIONS requests."
   };
   selectedConfigContent.value = configs[selectedConfig.value || ""] || undefined;
@@ -687,6 +757,105 @@ X-CSRF-Token: def456"
                   }
                 }"
               />
+            </div>
+          </div>
+          
+          <!-- Match & Replace Section -->
+          <div class="mb-6 w-full">
+            <h3 class="text-lg font-semibold text-surface-0 mb-3">Match & Replace</h3>
+            <p class="text-sm text-surface-300 mb-4">
+              Configure automatic string replacements in the request body of replayed requests.
+            </p>
+            
+            <!-- Add Rule Button -->
+            <div class="mb-4">
+              <Button
+                @click="addMatchReplaceRule"
+                label="Add Rule"
+                icon="fas fa-plus"
+                size="small"
+                :pt="{
+                  root: { class: 'bg-blue-600 hover:bg-blue-700 border-blue-600 hover:border-blue-700 h-8 px-4 text-sm rounded-lg' },
+                  label: { class: 'text-sm' }
+                }"
+              />
+            </div>
+            
+            <!-- Rules List -->
+            <div v-if="matchReplaceRules.length > 0" class="space-y-3">
+              <div 
+                v-for="rule in matchReplaceRules" 
+                :key="rule.id"
+                class="bg-surface-800 border border-surface-700 rounded-lg p-4"
+              >
+                <div class="flex items-start gap-3">
+                  <!-- Enable/Disable Toggle -->
+                  <div class="flex-shrink-0 mt-1">
+                    <input
+                      type="checkbox"
+                      :id="`rule-enabled-${rule.id}`"
+                      :checked="rule.enabled"
+                      @change="toggleMatchReplaceRule(rule.id)"
+                      class="w-4 h-4 text-blue-600 bg-surface-700 border-surface-600 rounded focus:ring-blue-500 focus:ring-2"
+                    />
+                  </div>
+                  
+                  <!-- Rule Content -->
+                  <div class="flex-1">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <!-- Match Pattern -->
+                      <div>
+                        <label :for="`rule-match-${rule.id}`" class="block text-sm font-medium text-surface-0 mb-1">
+                          Match String:
+                        </label>
+                        <input
+                          :id="`rule-match-${rule.id}`"
+                          type="text"
+                          :value="rule.match"
+                          @input="updateMatchReplaceRule(rule.id, 'match', ($event.target as HTMLInputElement).value)"
+                          placeholder="Enter text to match..."
+                          class="w-full px-3 py-2 bg-surface-700 border border-surface-600 rounded-lg text-surface-0 placeholder:text-surface-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
+                      
+                      <!-- Replace With -->
+                      <div>
+                        <label :for="`rule-replace-${rule.id}`" class="block text-sm font-medium text-surface-0 mb-1">
+                          Replace With:
+                        </label>
+                        <input
+                          :id="`rule-replace-${rule.id}`"
+                          type="text"
+                          :value="rule.replace"
+                          @input="updateMatchReplaceRule(rule.id, 'replace', ($event.target as HTMLInputElement).value)"
+                          placeholder="Enter replacement text..."
+                          class="w-full px-3 py-2 bg-surface-700 border border-surface-600 rounded-lg text-surface-0 placeholder:text-surface-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <!-- Remove Button -->
+                  <div class="flex-shrink-0">
+                    <Button
+                      @click="removeMatchReplaceRule(rule.id)"
+                      icon="fas fa-trash"
+                      severity="danger"
+                      size="small"
+                      :pt="{
+                        root: { class: 'bg-red-600 hover:bg-red-700 border-red-600 hover:border-red-700 h-8 w-8 p-0 rounded-lg' }
+                      }"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Empty State -->
+            <div v-else class="text-center py-8 text-surface-400">
+              <i class="fas fa-search text-2xl mb-2 block"></i>
+              <p>No match & replace rules configured</p>
+              <p class="text-sm">Click "Add Rule" to create your first rule</p>
             </div>
           </div>
           

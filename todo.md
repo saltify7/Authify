@@ -4,10 +4,10 @@
 - colour-code methods in table?
 
 ## LOGIC
+- change filtering to HTTPQL
 - drop requests (if possible to intercept, resend and drop)
 - automatic cookie and auth header extraction from modified responses
 - hotkey for switching between original and modified
-- make session storage per-project rather than global (integrate with project change)
 - modify "Apply headers to replay" to replace headers directly in session rather than making a new one
 
 ## PERFORMANCE

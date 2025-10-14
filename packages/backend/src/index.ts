@@ -3,6 +3,7 @@ import { getFilterSettings, setFilterSettings, shouldFilterRequest, isPluginGene
 import { saveAuthHeaders, getAuthHeaders, getStoredAuthHeaders, sendHeadersToAuthify, applyHeadersToReplay } from "./auth-headers";
 import { setSelectedScope, getSelectedScope, getSelectedScopeInternal, setSelectedScopeInternal, isUrlInScope } from "./scopes";
 import { getResponseContentLength, compareResponses } from "./utils";
+import { saveMatchReplaceRules, getMatchReplaceRules, applyMatchReplaceRules, hasEnabledMatchReplaceRules } from "./match-replace";
 
 // Result type for safe error handling between backend and frontend
 export type Result<T> =
@@ -559,9 +560,20 @@ const modifyAndResendRequest = async (sdk: SDK<API, BackendEvents>, originalReqR
       sdk.console.log(`Modified header: ${name}: ${value}`);
     }
 
+    // Extract body from original request
+    const body = headerEndIndex < lines.length ? lines.slice(headerEndIndex + 1).join('\n') : '';
+
+    // Apply match & replace rules to the request body (if any rules are configured)
+    let modifiedBody = body;
+    if (hasEnabledMatchReplaceRules()) {
+      modifiedBody = applyMatchReplaceRules(body);
+      if (modifiedBody !== body) {
+        sdk.console.log(`Applied match & replace rules to request body`);
+      }
+    }
+
     // Reconstruct the modified request
     const requestLine = lines[0]; // GET /path HTTP/1.1
-    const body = headerEndIndex < lines.length ? lines.slice(headerEndIndex + 1).join('\n') : '';
     
     let modifiedReqRaw = requestLine + '\r\n';
     
@@ -572,8 +584,8 @@ const modifyAndResendRequest = async (sdk: SDK<API, BackendEvents>, originalReqR
     
     // Add empty line and body
     modifiedReqRaw += '\r\n';
-    if (body) {
-      modifiedReqRaw += body;
+    if (modifiedBody) {
+      modifiedReqRaw += modifiedBody;
     }
 
     // Convert raw request to RequestSpec and send
@@ -615,9 +627,9 @@ const modifyAndResendRequest = async (sdk: SDK<API, BackendEvents>, originalReqR
       }
     }
     
-    // Set body if present
-    if (body.trim()) {
-      spec.setBody(body);
+    // Set body if present (use modified body from match & replace)
+    if (modifiedBody.trim()) {
+      spec.setBody(modifiedBody);
     }
 
     // Send the request
@@ -819,6 +831,8 @@ export type API = DefineAPI<{
   sendHeadersToAuthify: typeof sendHeadersToAuthify;
   applyHeadersToReplay: typeof applyHeadersToReplay;
   getCurrentProjectId: typeof getCurrentProjectId;
+  saveMatchReplaceRules: typeof saveMatchReplaceRules;
+  getMatchReplaceRules: typeof getMatchReplaceRules;
 }>;
 
 export async function init(sdk: SDK<API, BackendEvents>) {
@@ -838,6 +852,8 @@ export async function init(sdk: SDK<API, BackendEvents>) {
   sdk.api.register("sendHeadersToAuthify", sendHeadersToAuthify);
   sdk.api.register("applyHeadersToReplay", applyHeadersToReplay);
   sdk.api.register("getCurrentProjectId", getCurrentProjectId);
+  sdk.api.register("saveMatchReplaceRules", saveMatchReplaceRules);
+  sdk.api.register("getMatchReplaceRules", getMatchReplaceRules);
 
   // Register event listener for intercepted responses (event-driven approach)
   sdk.events.onInterceptResponse(async (sdk, request, response) => {
