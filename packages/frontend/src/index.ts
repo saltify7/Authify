@@ -6,6 +6,116 @@ import { SDKPlugin } from "./plugins/sdk";
 import "./styles/index.css";
 import type { FrontendSDK } from "./types";
 import App from "./views/App.vue";
+import { HTTPQLManager } from "./configs/httpql";
+
+// Helper function to replace auth headers in HTTP request text
+async function applyHeadersToReplay(sdk: any, requestText: string, authHeaders: string): Promise<string> {
+  if (!requestText || !authHeaders.trim()) {
+    return requestText;
+  }
+
+  const lines = requestText.split('\n');
+  if (lines.length < 1) {
+    return requestText;
+  }
+
+  // Find the empty line that separates headers from body
+  let headerEndIndex = -1;
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line || line.trim() === '') {
+      headerEndIndex = i;
+      break;
+    }
+  }
+
+  // If no separator found, assume all remaining lines are headers
+  if (headerEndIndex === -1) {
+    headerEndIndex = lines.length;
+  }
+
+  // Parse existing headers
+  const existingHeaders: Record<string, string> = {};
+  for (let i = 1; i < headerEndIndex; i++) {
+    const line = lines[i];
+    if (line) {
+      const trimmedLine = line.trim();
+      const colonIndex = trimmedLine.indexOf(':');
+      if (colonIndex > 0) {
+        const headerName = trimmedLine.substring(0, colonIndex).trim();
+        const headerValue = trimmedLine.substring(colonIndex + 1).trim();
+        existingHeaders[headerName] = headerValue;
+      }
+    }
+  }
+
+  // Parse auth headers from config
+  const authLines = authHeaders.split('\n').filter(line => line.trim());
+  const newAuthHeaders: Record<string, string> = {};
+  for (const line of authLines) {
+    const trimmedLine = line.trim();
+    const colonIndex = trimmedLine.indexOf(':');
+    if (colonIndex > 0) {
+      const headerName = trimmedLine.substring(0, colonIndex).trim();
+      const headerValue = trimmedLine.substring(colonIndex + 1).trim();
+      newAuthHeaders[headerName] = headerValue;
+    }
+  }
+
+  // Get the header names from the config to know which ones to replace
+  const configHeaderNames = Object.keys(newAuthHeaders);
+
+  // Remove existing headers that match the ones in config (case-insensitive)
+  const filteredHeaders: Record<string, string> = {};
+  for (const [name, value] of Object.entries(existingHeaders)) {
+    const lowerName = name.toLowerCase();
+    const shouldReplace = configHeaderNames.some(configName => 
+      lowerName === configName.toLowerCase()
+    );
+    
+    if (!shouldReplace) {
+      filteredHeaders[name] = value;
+    }
+  }
+
+  // Add new auth headers
+  const modifiedHeaders = { ...filteredHeaders, ...newAuthHeaders };
+
+  // Reconstruct the request
+  const requestLine = lines[0]; // GET /path HTTP/1.1
+  const body = headerEndIndex < lines.length ? lines.slice(headerEndIndex + 1).join('\r\n') : '';
+  
+  // Apply match & replace rules to the request body (if any rules are configured)
+  let modifiedBody = body;
+  try {
+    const hasRules = await sdk.backend.hasEnabledMatchReplaceRules();
+    if (hasRules) {
+      const modifiedBodyResult = await sdk.backend.applyMatchReplaceRules(body);
+      modifiedBody = modifiedBodyResult;
+      if (modifiedBody !== body) {
+        console.log(`Applied match & replace rules to request body`);
+      }
+    }
+  } catch (error) {
+    console.warn("Error applying match & replace rules:", error);
+    // Continue with original body if match & replace fails
+  }
+  
+  let modifiedRequest = requestLine + '\r\n';
+  
+  // Add all headers
+  for (const [name, value] of Object.entries(modifiedHeaders)) {
+    modifiedRequest += `${name}: ${value}\r\n`;
+  }
+  
+  // Add empty line and body
+  modifiedRequest += '\r\n';
+  if (modifiedBody) {
+    modifiedRequest += modifiedBody;
+  }
+
+  return modifiedRequest;
+}
 
 // This is the entry point for the frontend plugin
 export const init = (sdk: FrontendSDK) => {
@@ -51,6 +161,8 @@ export const init = (sdk: FrontendSDK) => {
     processRequestFromHistory: "authify.process-request-from-history",
     sendHeadersToAuthify: "authify.send-headers-to-authify",
     applyHeadersToReplay: "authify.apply-headers-to-replay",
+    createAuthifyFilter: "authify.create-authify-filter",
+    getAuthifyFilter: "authify.get-authify-filter",
   } as const;
 
   // Helper function to extract request IDs from BaseContext (replay and http-history pages)
@@ -242,61 +354,43 @@ export const init = (sdk: FrontendSDK) => {
     name: "Apply headers to Replay",
     run: async (context: any) => {      
       // Handle different context types
-      let requestIds: string[] = [];
-      
-      if ((context as any)?.type === "RequestRowContext") {
-        // Multiple requests selected from table rows
-        requestIds = (context as any).requests
-          .filter((request: any) => request.id !== undefined)
-          .map((request: any) => request.id);
-      } else if ((context as any)?.type === "RequestContext" && (context as any)?.request?.id) {
-        // Single request selected
-        requestIds = [(context as any).request.id];
-      } else if ((context as any)?.type === "BaseContext" || !(context as any)?.type) {
-        // BaseContext or no specific context - try to get request from current page
-        try {
-          requestIds = getRequestIdsFromBaseContext();
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          sdk.window.showToast(`Please send the request before applying new headers: ${errorMessage}`, { variant: "error" });
+
+      // testing
+      const view = sdk.window.getActiveEditor()?.getEditorView();
+      if (view === undefined) {
+        throw new Error("No active editor");
+      }
+      try {
+        // Get current auth headers from backend
+        const authResult = await sdk.backend.getAuthHeaders();
+        if (authResult.kind === "Error") {
+          sdk.window.showToast(`Failed to get auth headers: ${authResult.error}`, { variant: "error" });
           return;
         }
-      } else {
-        sdk.window.showToast("Please send the request before applying new headers", { variant: "error" });
-        return;
-      }
 
-      if (requestIds.length === 0) {
-        sdk.window.showToast("No valid requests found", { variant: "error" });
-        return;
-      }
-
-      // Process each request to apply headers
-      let successCount = 0;
-      let errorCount = 0;
-      
-      for (const requestId of requestIds) {
-        try {
-          const result = await sdk.backend.applyHeadersToReplay(requestId);
-          
-          if (result.kind === "Error") {
-            errorCount++;
-          } else {
-            sdk.replay.openTab(result.value.id);
-            successCount++;
-          }
-        } catch (error) {
-          errorCount++;
+        const authHeaders = authResult.value;
+        if (!authHeaders.trim()) {
+          sdk.window.showToast("No auth headers configured. Please add headers in the Config tab first.", { variant: "warning" });
+          return;
         }
-      }
 
-      // Show appropriate success/error message
-      if (successCount > 0 && errorCount === 0) {
-        sdk.window.showToast(`Successfully applied auth headers to ${successCount} request(s) in Replay!`, { variant: "success" });
-      } else if (successCount > 0 && errorCount > 0) {
-        sdk.window.showToast(`Applied headers to ${successCount} request(s), ${errorCount} failed.`, { variant: "warning" });
-      } else {
-        sdk.window.showToast(`Failed to apply headers to ${errorCount} request(s). Check console for details.`, { variant: "error" });
+        // Get current request text from editor
+        const currentRequestText = view.state.doc.toJSON().join("\r\n");
+        
+        // Parse and replace auth headers in request text
+        const modifiedRequestText = await applyHeadersToReplay(sdk, currentRequestText, authHeaders);
+        
+        // Update editor with modified request
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: modifiedRequestText },
+        });
+        view.focus();
+        
+        sdk.window.showToast("Auth headers applied successfully", { variant: "success" });
+      }
+      catch (error) {
+        console.error("Error applying headers to replay:", error);
+        sdk.window.showToast("Error applying headers to replay: " + error, { variant: "error" });
       }
     },
   });
@@ -344,9 +438,49 @@ export const init = (sdk: FrontendSDK) => {
     leadingIcon: "fas fa-arrow-down",
   });
 
+  // Initialize HTTPQL manager
+  const httpqlManager = new HTTPQLManager(sdk);
+
+  // Register command for creating Authify filter
+  sdk.commands.register(Commands.createAuthifyFilter, {
+    name: "Create Authify Filter",
+    run: async () => {
+      try {
+        const filter = await httpqlManager.createAuthifyFilter();
+        if (filter) {
+          sdk.window.showToast(`Authify filter created successfully!`, { variant: "success" });
+        } else {
+          sdk.window.showToast(`Failed to create Authify filter`, { variant: "error" });
+        }
+      } catch (error) {
+        sdk.window.showToast(`Error creating Authify filter: ${error}`, { variant: "error" });
+      }
+    },
+  });
+
+  // Register command for getting Authify filter
+  sdk.commands.register(Commands.getAuthifyFilter, {
+    name: "Get Authify Filter",
+    run: async () => {
+      try {
+        const filter = await httpqlManager.getAuthifyFilter();
+        if (filter) {
+          sdk.window.showToast(`Authify filter found: ${filter.name}`, { variant: "success" });
+          console.log("Authify filter details:", filter);
+        } else {
+          sdk.window.showToast(`Authify filter not found`, { variant: "warning" });
+        }
+      } catch (error) {
+        sdk.window.showToast(`Error retrieving Authify filter: ${error}`, { variant: "error" });
+      }
+    },
+  });
+
   // Add commands to command palette for global access
   sdk.commandPalette.register(Commands.sendHeadersToAuthify);
   sdk.commandPalette.register(Commands.processRequestFromHistory);
   sdk.commandPalette.register(Commands.applyHeadersToReplay);
+  sdk.commandPalette.register(Commands.createAuthifyFilter);
+  sdk.commandPalette.register(Commands.getAuthifyFilter);
 
 };

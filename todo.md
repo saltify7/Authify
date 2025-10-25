@@ -1,14 +1,12 @@
 ## UI
 - compare responses widget (diff) with synced scrolling
-- HTTPQL config for filtering requests
 - colour-code methods in table?
 
 ## LOGIC
-- change filtering to HTTPQL
 - drop requests (if possible to intercept, resend and drop)
-- automatic cookie and auth header extraction from modified responses
+    - not traditionally possible due to request sdk being asynchronous - might be possible via some kind of M&R?
 - hotkey for switching between original and modified
-- modify "Apply headers to replay" to replace headers directly in session rather than making a new one
+-"remove headers" option in addition to M&R
 
 ## PERFORMANCE
 - allow table limit to be customised (set to 500 rows for now)

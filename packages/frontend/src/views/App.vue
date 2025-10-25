@@ -17,6 +17,7 @@ import { StorageManager } from "@/utils/storage";
 import { ScopesManager } from "@/configs/scopes";
 import { AuthConfigManager } from "@/configs/auth-config";
 import { MatchReplaceManager, type MatchReplaceRule } from "@/configs/match-replace";
+import { HTTPQLManager } from "@/configs/httpql";
 
 // SDK instance
 const sdk = useSDK();
@@ -32,6 +33,17 @@ const authConfigManager = new AuthConfigManager(sdk, storage);
 
 // Match & Replace manager instance
 const matchReplaceManager = new MatchReplaceManager(sdk, storage);
+
+// HTTPQL manager instance
+const httpqlManager = new HTTPQLManager(sdk);
+
+// HTTPQL filter polling
+let httpqlPollingInterval: ReturnType<typeof setInterval> | undefined = undefined;
+
+// Filter status state
+const isCustomFilterActive = ref(false);
+const isCustomFilterEnabled = ref(false);
+let filterStatusPollingInterval: ReturnType<typeof setInterval> | undefined = undefined;
 
 // Caido request/response editors
 const reqEditor = ref<any>(null);
@@ -193,6 +205,12 @@ onMounted(async () => {
   // Start auto-refresh scopes every 5 seconds
   autoRefreshScopes();
   
+  // Start HTTPQL filter polling
+  startHttpqlPolling();
+  
+  // Start filter status polling
+  startFilterStatusPolling();
+  
   // Load filter settings
   void loadFilterSettings();
   
@@ -280,6 +298,12 @@ onBeforeUnmount(() => {
   if (scopeRefreshTimeout !== undefined) {
     clearTimeout(scopeRefreshTimeout);
   }
+  
+  // Clean up HTTPQL filter polling
+  stopHttpqlPolling();
+  
+  // Clean up filter status polling
+  stopFilterStatusPolling();
   
   // Clean up ResizeObserver
   if (resizeObserver !== undefined) {
@@ -403,7 +427,8 @@ const configOptions = [
   { label: "Authentication Headers", value: "auth-headers" },
   { label: "Scope Selection", value: "scope-selection" },
   { label: "Match & Replace", value: "match-replace" },
-  { label: "Request Filters", value: "request-filters" }
+  { label: "Request Filters", value: "request-filters" },
+  { label: "HTTPQL Filtering", value: "httpql-filtering" }
 ];
 
 const trafficOptions = [
@@ -423,7 +448,8 @@ const onConfigSelect = () => {
     "auth-headers": "Configure your authentication headers in the textarea. Paste headers one per line in the format 'Header-Name: value'. These headers will be automatically added to requests when the plugin is enabled. Headers are auto-saved as you type and persist between sessions.",
     "scope-selection": "Set a workspace scope to focus on specific domains or applications. You can select any scope from the workspace. Use 'Unset Scope' to process all HTTP traffic (though this might slow down the plugin).",
     "match-replace": "Configure automatic string replacements in the body of replayed requests and enable/disable them individually. Useful for replacing CSRF tokens or other values in the request body.",
-    "request-filters": "Enable filters to reduce noise in your traffic view. Ignore styling files (CSS, SCSS), JavaScript files, images, and OPTIONS requests."
+    "request-filters": "Enable filters to reduce noise in your traffic view. Ignore styling files (CSS, SCSS), JavaScript files, images, and OPTIONS requests.",
+    "httpql-filtering": "Create custom filters using HTTPQL for advanced request filtering. After creating a filter, it will appear in Caido's Overview > Filters sidebar. Use the toggle to enable/disable the filter."
   };
   selectedConfigContent.value = configs[selectedConfig.value || ""] || undefined;
 };
@@ -458,6 +484,139 @@ const clearTable = async () => {
     selected.value = undefined;
   }
 };
+
+// Function to create Authify filter
+const createAuthifyFilter = async () => {
+  try {
+    const filter = await httpqlManager.createAuthifyFilter();
+    if (filter) {
+      sdk.window.showToast(`Authify filter created successfully! Configure it in Overview > Filters.`, { variant: "success" });
+    } else {
+      sdk.window.showToast(`Failed to create Authify filter`, { variant: "error" });
+    }
+  } catch (error) {
+    sdk.window.showToast(`Error creating Authify filter: ${error}`, { variant: "error" });
+  }
+};
+
+// Start HTTPQL filter polling
+const startHttpqlPolling = () => {
+  if (httpqlPollingInterval !== undefined) {
+    return; // Already running
+  }
+  
+  httpqlPollingInterval = setInterval(async () => {
+    if (isCustomFilterEnabled.value) {
+      await httpqlManager.syncFilterWithBackend();
+    } else {
+      // When disabled, always set filter to null
+      await sdk.backend.storeHttpqlFilter(null);
+    }
+  }, 3000); // Poll every 3 seconds
+  
+  console.log("Started HTTPQL filter polling (every 5 seconds)");
+};
+
+// Stop HTTPQL filter polling
+const stopHttpqlPolling = () => {
+  if (httpqlPollingInterval !== undefined) {
+    clearInterval(httpqlPollingInterval);
+    httpqlPollingInterval = undefined;
+    console.log("Stopped HTTPQL filter polling");
+  }
+};
+
+// Check if custom filter is active
+const checkFilterStatus = async () => {
+  try {
+    if (!isCustomFilterEnabled.value) {
+      isCustomFilterActive.value = false;
+      return;
+    }
+    
+    const result = await sdk.backend.isHttpqlFilterActive();
+    if (result.kind === "Ok") {
+      isCustomFilterActive.value = result.value;
+    } else {
+      console.error("Error checking filter status:", result.error);
+      isCustomFilterActive.value = false;
+    }
+  } catch (error) {
+    console.error("Error checking filter status:", error);
+    isCustomFilterActive.value = false;
+  }
+};
+
+// Start filter status polling
+const startFilterStatusPolling = () => {
+  if (filterStatusPollingInterval !== undefined) {
+    return; // Already running
+  }
+  
+  // Check immediately
+  void checkFilterStatus();
+  
+  filterStatusPollingInterval = setInterval(async () => {
+    await checkFilterStatus();
+  }, 2000); // Poll every 2 seconds
+  
+  console.log("Started filter status polling (every 2 seconds)");
+};
+
+// Stop filter status polling
+const stopFilterStatusPolling = () => {
+  if (filterStatusPollingInterval !== undefined) {
+    clearInterval(filterStatusPollingInterval);
+    filterStatusPollingInterval = undefined;
+    console.log("Stopped filter status polling");
+  }
+};
+
+// Handle custom filter toggle change
+const toggleCustomFilter = async () => {
+  console.log("toggleCustomFilter called, isCustomFilterEnabled:", isCustomFilterEnabled.value);
+  
+  if (!isCustomFilterEnabled.value) {
+    // When disabling, immediately set filter to null
+    try {
+      console.log("Disabling filter - setting to null");
+      await sdk.backend.storeHttpqlFilter(null);
+      isCustomFilterActive.value = false;
+      console.log("Custom filter disabled, set to null");
+    } catch (error) {
+      console.error("Error disabling custom filter:", error);
+    }
+  } else {
+    // When enabling, sync filter with backend immediately
+    console.log("Enabling filter - syncing with backend");
+    await httpqlManager.syncFilterWithBackend();
+    await checkFilterStatus();
+    console.log("Custom filter enabled and synced");
+  }
+};
+
+// Force set filter to null (for debugging)
+const forceSetFilterToNull = async () => {
+  try {
+    console.log("Force setting filter to null");
+    await sdk.backend.storeHttpqlFilter(null);
+    isCustomFilterActive.value = false;
+    console.log("Filter force-set to null");
+  } catch (error) {
+    console.error("Error force-setting filter to null:", error);
+  }
+};
+
+// Watch for changes in filter enabled state
+watch(isCustomFilterEnabled, async (newValue) => {
+  console.log("Filter enabled state changed to:", newValue);
+  await toggleCustomFilter();
+  
+  // Force set to null when disabled
+  if (!newValue) {
+    await forceSetFilterToNull();
+  }
+});
 
 // Function to send selected request to replay
 const sendToReplay = async () => {
@@ -662,6 +821,39 @@ const handleGlobalKeydown = (event: KeyboardEvent) => {
             style="min-width: 120px; max-width: 320px; width: auto;"
             @click="refreshScopes"
           />
+          
+          <!-- Custom Filter Status Info Box -->
+          <div 
+            class="flex items-center gap-1 px-2 py-1 rounded-md"
+            :class="!isCustomFilterEnabled 
+              ? 'bg-gray-900/20 border border-gray-500/30'
+              : isCustomFilterActive 
+                ? 'bg-green-900/20 border border-green-500/30' 
+                : 'bg-red-900/20 border border-red-500/30'"
+          >
+            <i 
+              class="fas fa-sliders-h text-xs"
+              :class="!isCustomFilterEnabled 
+                ? 'text-gray-400'
+                : isCustomFilterActive 
+                  ? 'text-green-400' 
+                  : 'text-red-400'"
+            ></i>
+            <span 
+              class="text-xs"
+              :class="!isCustomFilterEnabled 
+                ? 'text-gray-300'
+                : isCustomFilterActive 
+                  ? 'text-green-300' 
+                  : 'text-red-300'"
+            >
+              {{ !isCustomFilterEnabled 
+                ? 'HTTPQL Filter Disabled' 
+                : isCustomFilterActive 
+                  ? 'HTTPQL Filter Active' 
+                  : 'HTTPQL Filter Not Found' }}
+            </span>
+          </div>
         </div>
       </div>
       
@@ -732,10 +924,17 @@ const handleGlobalKeydown = (event: KeyboardEvent) => {
         <div class="flex-1 min-h-0 flex flex-col p-4">
           <!-- Auth Headers Section -->
           <div class="mb-6 w-full">
-            <h3 class="text-lg font-semibold text-surface-0 mb-3">Auth Headers</h3>
-            <p class="text-sm text-surface-300 mb-4">
-              <span v-if="isEnabled" class="text-xs text-amber-400 ml-2">(Read-only while monitoring)</span>
-            </p>
+            <div class="flex items-center gap-2 mb-3">
+              <h3 class="text-lg font-semibold text-surface-0">Auth Headers</h3>
+              <div class="relative group">
+                <i class="fas fa-info-circle text-surface-400 text-sm cursor-help"></i>
+                <div class="absolute top-full left-0 mt-2 px-3 py-2 bg-surface-900 text-surface-0 text-sm rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
+                  Paste authentication headers (Cookie, Authorization, etc. - one per line). These headers will be automatically added to replayed requests. Read-only while monitoring is active.
+                  <div class="absolute bottom-full left-4 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-surface-900"></div>
+                </div>
+              </div>
+              <span v-if="isEnabled" class="text-xs text-amber-400">(Read-only while monitoring)</span>
+            </div>
             <div class="w-full">
               <Textarea
                 v-model="auth"
@@ -762,10 +961,16 @@ X-CSRF-Token: def456"
           
           <!-- Match & Replace Section -->
           <div class="mb-6 w-full">
-            <h3 class="text-lg font-semibold text-surface-0 mb-3">Match & Replace</h3>
-            <p class="text-sm text-surface-300 mb-4">
-              Configure automatic string replacements in the request body of replayed requests.
-            </p>
+            <div class="flex items-center gap-2 mb-3">
+              <h3 class="text-lg font-semibold text-surface-0">Match & Replace</h3>
+              <div class="relative group">
+                <i class="fas fa-info-circle text-surface-400 text-sm cursor-help"></i>
+                <div class="absolute top-full left-0 mt-2 px-3 py-2 bg-surface-900 text-surface-0 text-sm rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
+                  Configure automatic string replacements in the request body of replayed requests. This uses string based matching to replace content before sending modified requests.
+                  <div class="absolute bottom-full left-4 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-surface-900"></div>
+                </div>
+              </div>
+            </div>
             
             <!-- Add Rule Button -->
             <div class="mb-4">
@@ -861,9 +1066,17 @@ X-CSRF-Token: def456"
           
           <!-- Filter Settings Section -->
           <div class="flex-1 min-h-0 flex flex-col">
-            <h3 class="text-lg font-semibold text-surface-0 mb-3">Request Filters</h3>
-            <p class="text-sm text-surface-300 mb-4">Choose which file types and HTTP methods to ignore when monitoring requests (selected = requests will be ignored):</p>
-            
+            <div class="flex items-center gap-2 mb-3">
+              <h3 class="text-lg font-semibold text-surface-0">Request Filters</h3>
+              <div class="relative group">
+                <i class="fas fa-info-circle text-surface-400 text-sm cursor-help"></i>
+                <div class="absolute top-full left-0 mt-2 px-3 py-2 bg-surface-900 text-surface-0 text-sm rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
+                  Choose which file types and HTTP methods to ignore when monitoring requests.
+                  <div class="absolute bottom-full left-4 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-surface-900"></div>
+                </div>
+              </div>
+            </div>
+
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <!-- Styling Files -->
               <div class="bg-surface-800 border border-surface-700 rounded-lg p-4">
@@ -936,6 +1149,52 @@ X-CSRF-Token: def456"
                   </div>
                 </div>
               </div>
+            </div>
+            
+          </div>
+          
+          <!-- HTTPQL Filtering Section -->
+          <div class="flex-1 min-h-0 flex flex-col mt-8">
+            <div class="flex items-center gap-2 mb-3">
+              <h3 class="text-lg font-semibold text-surface-0">HTTPQL Filtering</h3>
+              <div class="relative group">
+                <i class="fas fa-info-circle text-surface-400 text-sm cursor-help"></i>
+                <div class="absolute top-full left-0 mt-2 px-3 py-2 bg-surface-900 text-surface-0 text-sm rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
+                  For advanced filtering, create a filter using the button below configure it from the "Custom Authify filter" in the Overview > Filters sidebar.
+                  <div class="absolute bottom-full left-4 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-surface-900"></div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- HTTPQL Filter Buttons -->
+            <div class="flex justify-start gap-3">
+              <Button
+                @click="createAuthifyFilter"
+                label="Create HTTPQL Authify Filter"
+                icon="fas fa-sliders-h"
+                :pt="{
+                  root: { class: 'bg-blue-600 hover:bg-blue-700 border-blue-600 hover:border-blue-700 h-10 px-6 text-sm rounded-lg' },
+                  label: { class: 'text-sm' }
+                }"
+              />
+              
+              <ToggleButton
+                v-model="isCustomFilterEnabled"
+                :pt="{
+                  root: { 
+                    class: `h-10 px-4 text-sm rounded-lg border transition-colors ${
+                      isCustomFilterEnabled 
+                        ? 'bg-green-600 hover:bg-green-700 border-green-600 hover:border-green-700' 
+                        : 'bg-red-600 hover:bg-red-700 border-red-600 hover:border-red-700'
+                    }`
+                  },
+                  label: { class: 'text-sm text-white' }
+                }"
+                :onLabel="'Filter Enabled'"
+                :offLabel="'Filter Disabled'"
+                :onIcon="'fas fa-check'"
+                :offIcon="'fas fa-times'"
+              />
             </div>
           </div>
         </div>

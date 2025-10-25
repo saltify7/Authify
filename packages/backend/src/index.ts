@@ -1,6 +1,6 @@
 import type { DefineAPI, DefineEvents, SDK } from "caido:plugin";
-import { getFilterSettings, setFilterSettings, shouldFilterRequest, isPluginGeneratedRequest } from "./filter";
-import { saveAuthHeaders, getAuthHeaders, getStoredAuthHeaders, sendHeadersToAuthify, applyHeadersToReplay } from "./auth-headers";
+import { getFilterSettings, setFilterSettings, shouldFilterRequest, isPluginGeneratedRequest, storeHttpqlFilter, getStoredHttpqlFilter, isHttpqlFilterActive } from "./filter";
+import { saveAuthHeaders, getAuthHeaders, getStoredAuthHeaders, sendHeadersToAuthify } from "./auth-headers";
 import { setSelectedScope, getSelectedScope, getSelectedScopeInternal, setSelectedScopeInternal, isUrlInScope } from "./scopes";
 import { getResponseContentLength, compareResponses } from "./utils";
 import { saveMatchReplaceRules, getMatchReplaceRules, applyMatchReplaceRules, hasEnabledMatchReplaceRules } from "./match-replace";
@@ -344,7 +344,22 @@ const processNewRequest = async (sdk: SDK, req: any, resp: any): Promise<Row | n
       return null;
     }
   }
-  
+
+  try {
+    let storedHttpqlFilter = await getStoredHttpqlFilter(sdk);
+    if (await isHttpqlFilterActive(sdk) && storedHttpqlFilter) {
+      sdk.console.log(`storedHttpqlFilter: ${storedHttpqlFilter.query}`);
+      if (!sdk.requests.matches(storedHttpqlFilter.query, req, resp)) {
+        sdk.console.log(`Filtered out request: ${method} ${url} (HTTPQL filter)`);
+        return null;
+      } else {
+        sdk.console.log(`Request matches HTTPQL filter: ${method} ${url}`);
+      }
+    }
+  } catch (error) {
+    sdk.console.log(`Error applying HTTPQL filter to request ${method} ${url}: ${error}`);
+  }
+
   // Parse URL to extract hostname and path
   let hostname = "";
   let path = "";
@@ -829,10 +844,14 @@ export type API = DefineAPI<{
   setFilterSettings: typeof setFilterSettings;
   processRequestFromHistory: typeof processRequestFromHistory;
   sendHeadersToAuthify: typeof sendHeadersToAuthify;
-  applyHeadersToReplay: typeof applyHeadersToReplay;
   getCurrentProjectId: typeof getCurrentProjectId;
   saveMatchReplaceRules: typeof saveMatchReplaceRules;
   getMatchReplaceRules: typeof getMatchReplaceRules;
+  applyMatchReplaceRules: (sdk: SDK, body: string) => string;
+  hasEnabledMatchReplaceRules: (sdk: SDK) => boolean;
+  storeHttpqlFilter: typeof storeHttpqlFilter;
+  getStoredHttpqlFilter: typeof getStoredHttpqlFilter;
+  isHttpqlFilterActive: typeof isHttpqlFilterActive;
 }>;
 
 export async function init(sdk: SDK<API, BackendEvents>) {
@@ -850,10 +869,14 @@ export async function init(sdk: SDK<API, BackendEvents>) {
   sdk.api.register("setFilterSettings", setFilterSettings);
   sdk.api.register("processRequestFromHistory", processRequestFromHistory);
   sdk.api.register("sendHeadersToAuthify", sendHeadersToAuthify);
-  sdk.api.register("applyHeadersToReplay", applyHeadersToReplay);
   sdk.api.register("getCurrentProjectId", getCurrentProjectId);
   sdk.api.register("saveMatchReplaceRules", saveMatchReplaceRules);
   sdk.api.register("getMatchReplaceRules", getMatchReplaceRules);
+  sdk.api.register("applyMatchReplaceRules", (sdk: SDK, body: string) => applyMatchReplaceRules(body));
+  sdk.api.register("hasEnabledMatchReplaceRules", (sdk: SDK) => hasEnabledMatchReplaceRules());
+  sdk.api.register("storeHttpqlFilter", storeHttpqlFilter);
+  sdk.api.register("getStoredHttpqlFilter", getStoredHttpqlFilter);
+  sdk.api.register("isHttpqlFilterActive", isHttpqlFilterActive);
 
   // Register event listener for intercepted responses (event-driven approach)
   sdk.events.onInterceptResponse(async (sdk, request, response) => {

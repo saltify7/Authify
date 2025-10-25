@@ -21,6 +21,9 @@ let filterSettings: FilterSettings = {
   ignoreOptions: true
 };
 
+// Store for HTTPQL filter data
+let storedHttpqlFilter: { name: string; alias: string; query: string } | null = null;
+
 // Function to get filter settings
 export const getFilterSettings = (sdk: SDK): Result<FilterSettings> => {
   return { kind: "Ok", value: { ...filterSettings } };
@@ -108,8 +111,44 @@ export const isPluginGeneratedRequest = (sdk: SDK, req: any, storedAuthHeaders: 
   return false;
 };
 
+// Store HTTPQL filter data
+export const storeHttpqlFilter = async (sdk: SDK, filterData: { name: string; alias: string; query: string } | null): Promise<Result<void>> => {
+  try {
+    storedHttpqlFilter = filterData;
+    if (filterData) {
+      sdk.console.log(`Stored HTTPQL filter: ${filterData.name} (${filterData.alias})`);
+    } else {
+      sdk.console.log("Stored null HTTPQL filter (filter not found or error occurred)");
+    }
+    return { kind: "Ok", value: undefined };
+  } catch (error) {
+    sdk.console.error(`Error storing HTTPQL filter: ${error}`);
+    return { kind: "Error", error: `Failed to store HTTPQL filter: ${error}` };
+  }
+};
+
+// Get stored HTTPQL filter data
+export const getStoredHttpqlFilter = async (sdk: SDK): Promise<{ name: string; alias: string; query: string } | null> => {
+  return storedHttpqlFilter;
+};
+
+// Check if HTTPQL filter is active
+export const isHttpqlFilterActive = async (sdk: SDK): Promise<Result<boolean>> => {
+  try {
+    const isActive = storedHttpqlFilter !== null;
+    sdk.console.log(`HTTPQL filter active: ${isActive}`);
+    return { kind: "Ok", value: isActive };
+  } catch (error) {
+    sdk.console.error(`Error checking HTTPQL filter status: ${error}`);
+    return { kind: "Error", error: `Failed to check HTTPQL filter status: ${error}` };
+  }
+};
+
 // Export API type for filter functions
 export type FilterAPI = DefineAPI<{
   getFilterSettings: typeof getFilterSettings;
   setFilterSettings: typeof setFilterSettings;
+  storeHttpqlFilter: typeof storeHttpqlFilter;
+  getStoredHttpqlFilter: typeof getStoredHttpqlFilter;
+  isHttpqlFilterActive: typeof isHttpqlFilterActive;
 }>;
