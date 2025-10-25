@@ -15,10 +15,12 @@ You can use the "How to use" guide in the plugin's navigation bar or find a brie
 
 ### Additional functionality:
 - Individual scope selection to filter what Requests are processed by Authify
+- Configure Match & Replace rules to replace strings such as CSRF tokens in the request body of repeated requests
 - Choose to filter certain requests to reduce clutter (OPTIONS requests, styling, javascript and image files)
+- Advanced filtering of requests using HTTPQL
 - "Send to Replay" sends the current request to a new Replay session
 - Memory of selected scope and Config between Caido restarts
-<img width="1917" height="973" alt="Screenshot 2025-09-23 235944" src="https://github.com/user-attachments/assets/330d0aa8-af86-4991-a518-125eed5e2a54" />
+<img width="1915" height="991" alt="image" src="https://github.com/user-attachments/assets/5e588cb4-d9bf-4b6b-b17a-0f796a4c2a04" />
 
 
 ### Context Menu and Shortcuts:
