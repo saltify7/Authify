@@ -70,7 +70,7 @@ const sendToReplay = async (sdk: SDK, requestId: string, useModified: boolean): 
     }
 
     // Parse the raw HTTP request to create a RequestSpec
-    const lines = requestRaw.split('\n');
+    const lines = requestRaw.split(/\r?\n/);
     if (lines.length < 1) {
       return { kind: "Error", error: "Invalid request format" };
     }
@@ -519,7 +519,7 @@ const modifyAndResendRequest = async (sdk: SDK<API, BackendEvents>, originalReqR
     }
 
     // Parse the original raw request
-    const lines = originalReqRaw.split('\n');
+    const lines = originalReqRaw.split(/\r?\n/);
     if (lines.length < 1) {
       sdk.console.log("Invalid request format");
       return { code: 0, length: 0, modifiedReqRaw: "", modifiedRespRaw: "", comparison: "unknown" };
@@ -576,7 +576,7 @@ const modifyAndResendRequest = async (sdk: SDK<API, BackendEvents>, originalReqR
     }
 
     // Extract body from original request
-    const body = headerEndIndex < lines.length ? lines.slice(headerEndIndex + 1).join('\n') : '';
+    const body = headerEndIndex < lines.length ? lines.slice(headerEndIndex + 1).join('\r\n') : '';
 
     // Apply match & replace rules to the request body (if any rules are configured)
     let modifiedBody = body;
@@ -658,7 +658,7 @@ const modifyAndResendRequest = async (sdk: SDK<API, BackendEvents>, originalReqR
       const modifiedLength = getResponseContentLength(result.response, modifiedRespRaw);
       
       // Parse original response to get code and length
-      const originalLines = originalRespRaw.split('\n');
+      const originalLines = originalRespRaw.split(/\r?\n/);
       const originalCode = originalLines.length > 0 && originalLines[0] ? parseInt(originalLines[0].split(' ')[1] || '0') || 0 : 0;
       
       // Get original response length using helper function

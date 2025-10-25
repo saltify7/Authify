@@ -14,7 +14,7 @@ async function applyHeadersToReplay(sdk: any, requestText: string, authHeaders: 
     return requestText;
   }
 
-  const lines = requestText.split('\n');
+  const lines = requestText.split(/\r?\n/);
   if (lines.length < 1) {
     return requestText;
   }
@@ -113,7 +113,7 @@ async function applyHeadersToReplay(sdk: any, requestText: string, authHeaders: 
   if (modifiedBody) {
     modifiedRequest += modifiedBody;
   }
-
+  
   return modifiedRequest;
 }
 

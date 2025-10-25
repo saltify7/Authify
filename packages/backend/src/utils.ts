@@ -36,7 +36,7 @@ export const getResponseContentLength = (resp: any, respRaw: string): number => 
 
   // For responses without Content-Length header, calculate body length
   // Find the empty line that separates headers from body
-  const lines = respRaw.split('\n');
+  const lines = respRaw.split(/\r?\n/);
   let headerEndIndex = -1;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -53,7 +53,7 @@ export const getResponseContentLength = (resp: any, respRaw: string): number => 
 
   // Calculate body length (everything after the empty line)
   const bodyLines = lines.slice(headerEndIndex + 1);
-  const body = bodyLines.join('\n');
+  const body = bodyLines.join('\r\n');
   return body.length;
 };
 
@@ -61,7 +61,7 @@ export const getResponseContentLength = (resp: any, respRaw: string): number => 
 export const extractResponseBody = (responseRaw: string): string => {
   if (!responseRaw) return "";
   
-  const lines = responseRaw.split('\n');
+  const lines = responseRaw.split(/\r?\n/);
   let bodyStartIndex = -1;
   
   // Find where the body starts (after the empty line that separates headers from body)
@@ -80,14 +80,14 @@ export const extractResponseBody = (responseRaw: string): string => {
   
   // Extract body content
   const bodyLines = lines.slice(bodyStartIndex);
-  return bodyLines.join('\n');
+  return bodyLines.join('\r\n');
 };
 
 // Helper function to parse location header from response
 export const getLocationHeader = (responseRaw: string): string | undefined => {
   if (!responseRaw) return undefined;
   
-  const lines = responseRaw.split('\n');
+  const lines = responseRaw.split(/\r?\n/);
   
   // Look for Location header in the response headers
   for (let i = 0; i < lines.length; i++) {
