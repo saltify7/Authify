@@ -6,7 +6,7 @@
 - drop requests (if possible to intercept, resend and drop)
     - not traditionally possible due to request sdk being asynchronous - might be possible via some kind of M&R?
 - hotkey for switching between original and modified
--"remove headers" option in addition to M&R
+- "remove headers" option in addition to M&R
 
 ## PERFORMANCE
 - allow table limit to be customised (set to 500 rows for now)

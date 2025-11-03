@@ -70,25 +70,46 @@ export const sendHeadersToAuthify = async (sdk: SDK, requestId: string): Promise
     // Extract headers from the request that match common auth header names
     const authHeaderNames = [
       'authorization', 'cookie', 'x-api-key', 'x-auth-token', 'x-access-token',
-      'x-csrf-token', 'x-requested-with', 'x-session-id', 'x-user-token',
+      'x-csrf-token', 'x-session-id', 'x-user-token',
       'bearer', 'token', 'jwt', 'api-key', 'auth-token', 'access-token'
     ];
 
     const updatedHeaders: Record<string, string> = { ...currentAuthMap };
     let updatedCount = 0;
 
-    // Check each request header against our auth header list
+    // Check each request header against our auth header list and current config headers
     for (const [headerName, headerValues] of Object.entries(requestHeaders)) {
-      // Check if this header matches any of our auth header patterns (case-insensitive matching, but preserve original case)
-      const lowerHeaderName = headerName.toLowerCase();
-      const isAuthHeader = authHeaderNames.some(authName => 
-        lowerHeaderName.includes(authName) || authName.includes(lowerHeaderName)
-      );
+      if (!Array.isArray(headerValues) || headerValues.length === 0 || !headerValues[0]) {
+        continue;
+      }
 
-      if (isAuthHeader && Array.isArray(headerValues) && headerValues.length > 0 && headerValues[0]) {
-        const headerValue = headerValues[0];
+      const headerValue = headerValues[0];
+      const lowerHeaderName = headerName.toLowerCase();
+      
+      // Check if this header matches any of our predefined auth header patterns (exact case-insensitive match)
+      const matchesAuthHeaderList = authHeaderNames.some(authName => 
+        lowerHeaderName === authName.toLowerCase()
+      );
+      
+      // Check if this header matches any header already in the config (case-insensitive)
+      const matchesConfigHeader = Object.keys(currentAuthMap).some(configHeaderName =>
+        configHeaderName.toLowerCase() === lowerHeaderName
+      );
+      
+      // Update if it matches predefined auth headers OR if it matches headers already in config
+      if (matchesAuthHeaderList || matchesConfigHeader) {
+        // Remove any existing header with the same name (case-insensitive) before adding the new one
+        const keysToRemove: string[] = [];
+        for (const existingKey of Object.keys(updatedHeaders)) {
+          if (existingKey.toLowerCase() === lowerHeaderName && existingKey !== headerName) {
+            keysToRemove.push(existingKey);
+          }
+        }
+        for (const key of keysToRemove) {
+          delete updatedHeaders[key];
+        }
         
-        // Update the header in our map (preserving original case)
+        // Update the header in our map (preserving original case from request)
         updatedHeaders[headerName] = headerValue;
         updatedCount++;
         

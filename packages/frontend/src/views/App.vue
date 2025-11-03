@@ -10,6 +10,7 @@ import Column from "primevue/column";
 import ToggleButton from "primevue/togglebutton";
 import Button from "primevue/button";
 import Dropdown from "primevue/dropdown";
+import ContextMenu from "primevue/contextmenu";
 
 import { useSDK } from "@/plugins/sdk";
 import { prettifyHttpData } from "@/utils/json-prettify";
@@ -50,6 +51,7 @@ const reqEditor = ref<any>(null);
 const respEditor = ref<any>(null);
 const reqEditorElement = ref<HTMLElement | null>(null);
 const respEditorElement = ref<HTMLElement | null>(null);
+const tableWrapper = ref<HTMLElement | null>(null);
 
 // Auth config state is now managed by authConfigManager
 const auth = authConfigManager.authHeaders;
@@ -115,6 +117,10 @@ type Row = {
 const rows = ref<Row[]>([]);
 const selected = ref<Row | undefined>(undefined);
 const activeTabIndex = ref(0);
+
+// Context menu state
+const contextMenu = ref<any>(null);
+const contextMenuRow = ref<Row | undefined>(undefined);
 
 
 let resizeObserver: ResizeObserver | undefined = undefined;
@@ -794,6 +800,121 @@ const handleGlobalKeydown = (event: KeyboardEvent) => {
   }
 };
 
+// Context menu items
+const contextMenuItems = ref([
+  {
+    label: "Repeat Request",
+    icon: "fas fa-redo",
+    command: () => {
+      if (contextMenuRow.value) {
+        repeatRequest(contextMenuRow.value);
+      }
+    }
+  },
+  {
+    label: "Ignore path in HTTPQL Filter",
+    icon: "fas fa-ban",
+    command: () => {
+      if (contextMenuRow.value) {
+        ignorePathInHttpql(contextMenuRow.value);
+      }
+    }
+  }
+]);
+
+// Handle right-click on table
+const handleTableContextMenu = (event: MouseEvent) => {
+  // Find the row that was right-clicked
+  const target = event.target as HTMLElement;
+  const rowElement = target.closest('tr');
+  
+  if (!rowElement) {
+    return;
+  }
+  
+  // Skip header rows (they're in thead)
+  if (rowElement.closest('thead')) {
+    return;
+  }
+  
+  // Find the tbody element and get row index
+  const tbody = rowElement.closest('tbody');
+  if (!tbody) {
+    return;
+  }
+  
+  const rowIndex = Array.from(tbody.querySelectorAll('tr')).indexOf(rowElement);
+  
+  // Match row by index (excluding header)
+  if (rowIndex >= 0 && rowIndex < rows.value.length) {
+    const row = rows.value[rowIndex];
+    event.preventDefault();
+    contextMenuRow.value = row;
+    contextMenu.value.show(event);
+  }
+};
+
+// Placeholder functions for context menu actions
+const repeatRequest = async (row: Row) => {
+  const result = await sdk.backend.processRequestFromHistory(row.id);
+  if (result.kind === "Error") {
+    sdk.window.showToast(`Failed to repeat request: ${result.error}`, { variant: "error" });
+  } else {
+    sdk.window.showToast("Request repeated successfully", { variant: "success" });
+  }
+};
+
+const ignorePathInHttpql = async (row: Row) => {
+  // Get the current authify filter
+  const authifyFilter = await httpqlManager.getAuthifyFilter();
+  
+  if (!authifyFilter) {
+    sdk.window.showToast("Please create an Authify filter first in the Configuration tab", { variant: "error" });
+    return;
+  }
+  
+  // Extract just the path (without query params)
+  // The row.path field might include query params, so we need to parse it
+  let pathWithoutQuery = row.path;
+  try {
+    // If path contains query params (has '?'), extract just the pathname
+    const queryIndex = pathWithoutQuery.indexOf('?');
+    if (queryIndex !== -1) {
+      pathWithoutQuery = pathWithoutQuery.substring(0, queryIndex);
+    }
+  } catch (error) {
+    console.warn("Error parsing path:", error);
+  }
+  
+  // Build the new query
+  // Note: In HTTPQL, paths are request properties, so use req.path
+  // ncont means "does not contain" - this will exclude requests with this path
+  let newQuery = `req.path.ncont:"${pathWithoutQuery}"`;
+  
+  // If there's already a query, prepend with " AND "
+  const currentQuery = authifyFilter.query?.trim() || '';
+  if (currentQuery !== '') {
+    newQuery = `${currentQuery} AND ${newQuery}`;
+  }
+  
+  // Update the filter
+  const updatedFilter = await httpqlManager.updateFilter(authifyFilter.id, {
+    name: authifyFilter.name,
+    alias: authifyFilter.alias,
+    query: newQuery
+  });
+  
+  if (!updatedFilter) {
+    sdk.window.showToast("Failed to update HTTPQL filter", { variant: "error" });
+    return;
+  }
+  
+  // Sync with backend
+  await httpqlManager.syncFilterWithBackend();
+  
+  sdk.window.showToast(`Path "${pathWithoutQuery}" added to HTTPQL filter`, { variant: "success" });
+};
+
 </script>
 
 <template>
@@ -1206,29 +1327,36 @@ X-CSRF-Token: def456"
             <!-- Left: full-height table -->
             <SplitterPanel class="flex flex-col min-h-0 h-full basis-1/2">
               <div class="flex-1 min-h-0 h-full flex flex-col">
-                <DataTable
-                  v-model:selection="selected"
-                  :value="rows"
-                  dataKey="id"
-                  selectionMode="single"
-                  :metaKeySelection="false"
-                  :keyboardSelection="true"
-                  stripedRows
-                  scrollable
-                  scrollHeight="flex"
-                  resizableColumns
-                  columnResizeMode="fit"
-                  tableStyle="table-layout: fixed; border-collapse: separate; border-spacing: 0;"
-                  @keydown="handleTableKeydown"
-                  :pt="{ 
-                    root: { class: 'h-full flex flex-col' }, 
-                    wrapper: { class: 'h-full' }, 
-                    table: { class: 'text-sm' },
-                    headerCell: { class: 'border-r border-surface-600' },
-                    bodyCell: { class: 'border-r border-surface-600' }
-                  }"
-                >
-                  <Column
+                <ContextMenu ref="contextMenu" :model="contextMenuItems" :pt="{
+                  root: { class: 'bg-surface-800 border border-surface-700 rounded-lg' },
+                  item: { class: 'text-surface-0 hover:bg-surface-700' },
+                  itemIcon: { class: 'text-surface-300 mr-2' },
+                  itemLabel: { class: 'text-surface-0' }
+                }" />
+                <div ref="tableWrapper" @contextmenu="handleTableContextMenu" class="h-full">
+                  <DataTable
+                    v-model:selection="selected"
+                    :value="rows"
+                    dataKey="id"
+                    selectionMode="single"
+                    :metaKeySelection="false"
+                    :keyboardSelection="true"
+                    stripedRows
+                    scrollable
+                    scrollHeight="flex"
+                    resizableColumns
+                    columnResizeMode="fit"
+                    tableStyle="table-layout: fixed; border-collapse: separate; border-spacing: 0;"
+                    @keydown="handleTableKeydown"
+                    :pt="{ 
+                      root: { class: 'h-full flex flex-col' }, 
+                      wrapper: { class: 'h-full' }, 
+                      table: { class: 'text-sm' },
+                      headerCell: { class: 'border-r border-surface-600' },
+                      bodyCell: { class: 'border-r border-surface-600' }
+                    }"
+                  >
+                    <Column
                     field="id"
                     header="ID"
                     style="width: 40px"
@@ -1341,7 +1469,8 @@ X-CSRF-Token: def456"
                       </span>
                     </template>
                   </Column>
-                </DataTable>
+                  </DataTable>
+                </div>
               </div>
             </SplitterPanel>
 

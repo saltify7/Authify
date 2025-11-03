@@ -113,7 +113,7 @@ async function applyHeadersToReplay(sdk: any, requestText: string, authHeaders: 
   if (modifiedBody) {
     modifiedRequest += modifiedBody;
   }
-  
+
   return modifiedRequest;
 }
 

@@ -568,10 +568,25 @@ const modifyAndResendRequest = async (sdk: SDK<API, BackendEvents>, originalReqR
       }
     }
     
-    // Merge headers: start with original, then add/overwrite with auth headers
-    const modifiedHeaders = { ...originalHeaders };
+    // Get the header names from the config to know which ones to replace
+    const configHeaderNames = Object.keys(authHeaders);
+    
+    // Remove existing headers that match the ones in config (case-insensitive)
+    const filteredHeaders: Record<string, string> = {};
+    for (const [name, value] of Object.entries(originalHeaders)) {
+      const lowerName = name.toLowerCase();
+      const shouldReplace = configHeaderNames.some(configName => 
+        lowerName === configName.toLowerCase()
+      );
+      
+      if (!shouldReplace) {
+        filteredHeaders[name] = value;
+      }
+    }
+    
+    // Merge headers: start with filtered original headers, then add auth headers
+    const modifiedHeaders = { ...filteredHeaders, ...authHeaders };
     for (const [name, value] of Object.entries(authHeaders)) {
-      modifiedHeaders[name] = value;
       sdk.console.log(`Modified header: ${name}: ${value}`);
     }
 
