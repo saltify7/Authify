@@ -33,27 +33,77 @@ export const getStoredMatchReplaceRules = (): MatchReplaceRule[] => {
   return storedMatchReplaceRules;
 };
 
-// Apply match & replace rules to request body
-export const applyMatchReplaceRules = (body: string): string => {
-  if (!body || body.trim() === '') {
-    return body;
+// Helper function to apply a single rule to a string
+const applyRuleToString = (text: string, rule: MatchReplaceRule): string => {
+  if (!text || text.trim() === '') {
+    return text;
   }
+  
+  try {
+    // Use global replace to replace all occurrences
+    const regex = new RegExp(escapeRegExp(rule.match), 'g');
+    return text.replace(regex, rule.replace);
+  } catch (error) {
+    // If regex creation fails, fall back to simple string replacement
+    return text.replace(new RegExp(rule.match.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), rule.replace);
+  }
+};
 
-  let modifiedBody = body;
+// Apply match & replace rules across the entire request (headers, request line, and body)
+export const applyMatchReplaceRules = (
+  body: string, 
+  requestLine?: string, 
+  headers?: Record<string, string>
+): { body: string; requestLine?: string; headers?: Record<string, string> } => {
   const enabledRules = storedMatchReplaceRules.filter(rule => rule.enabled && rule.match.trim() !== '');
   
-  for (const rule of enabledRules) {
-    try {
-      // Use global replace to replace all occurrences
-      const regex = new RegExp(escapeRegExp(rule.match), 'g');
-      modifiedBody = modifiedBody.replace(regex, rule.replace);
-    } catch (error) {
-      // If regex creation fails, fall back to simple string replacement
-      modifiedBody = modifiedBody.replace(new RegExp(rule.match.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), rule.replace);
+  if (enabledRules.length === 0) {
+    return { body, requestLine, headers };
+  }
+  
+  // Apply rules to body
+  let modifiedBody = body;
+  if (body && body.trim() !== '') {
+    for (const rule of enabledRules) {
+      modifiedBody = applyRuleToString(modifiedBody, rule);
     }
   }
   
-  return modifiedBody;
+  // Apply rules to request line
+  let modifiedRequestLine = requestLine;
+  if (requestLine !== undefined && requestLine.trim() !== '') {
+    let currentRequestLine = requestLine;
+    for (const rule of enabledRules) {
+      currentRequestLine = applyRuleToString(currentRequestLine, rule);
+    }
+    modifiedRequestLine = currentRequestLine;
+  }
+  
+  // Apply rules to headers (both names and values)
+  let modifiedHeaders = headers;
+  if (headers !== undefined) {
+    modifiedHeaders = {};
+    for (const [name, value] of Object.entries(headers)) {
+      let modifiedName = name;
+      let modifiedValue = value;
+      
+      // Apply rules to header name
+      for (const rule of enabledRules) {
+        modifiedName = applyRuleToString(modifiedName, rule);
+      }
+      
+      // Apply rules to header value
+      if (value && value.trim() !== '') {
+        for (const rule of enabledRules) {
+          modifiedValue = applyRuleToString(modifiedValue, rule);
+        }
+      }
+      
+      modifiedHeaders[modifiedName] = modifiedValue;
+    }
+  }
+  
+  return { body: modifiedBody, requestLine: modifiedRequestLine, headers: modifiedHeaders };
 };
 
 // Helper function to escape special regex characters for literal string matching

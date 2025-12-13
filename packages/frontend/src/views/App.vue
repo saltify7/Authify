@@ -453,7 +453,7 @@ const onConfigSelect = () => {
   const configs: Record<string, string> = {
     "auth-headers": "Configure your authentication headers in the textarea. Paste headers one per line in the format 'Header-Name: value'. These headers will be automatically added to requests when the plugin is enabled. Headers are auto-saved as you type and persist between sessions.",
     "scope-selection": "Set a workspace scope to focus on specific domains or applications. You can select any scope from the workspace. Use 'Unset Scope' to process all HTTP traffic (though this might slow down the plugin).",
-    "match-replace": "Configure automatic string replacements in the body of replayed requests and enable/disable them individually. Useful for replacing CSRF tokens or other values in the request body.",
+    "match-replace": "Configure automatic string replacements in raw replayed requests and enable/disable them individually. Useful for replacing CSRF tokens or other values in the request body.",
     "request-filters": "Enable filters to reduce noise in your traffic view. Ignore styling files (CSS, SCSS), JavaScript files, images, and OPTIONS requests.",
     "httpql-filtering": "Create custom filters using HTTPQL for advanced request filtering. After creating a filter, it will appear in Caido's Overview > Filters sidebar. Use the toggle to enable/disable the filter."
   };
@@ -1087,7 +1087,7 @@ X-CSRF-Token: def456"
               <div class="relative group">
                 <i class="fas fa-info-circle text-surface-400 text-sm cursor-help"></i>
                 <div class="absolute top-full left-0 mt-2 px-3 py-2 bg-surface-900 text-surface-0 text-sm rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
-                  Configure automatic string replacements in the request body of replayed requests. This uses string based matching to replace content before sending modified requests.
+                  Configure automatic string replacements in raw replayed requests. This uses string based matching to replace content before sending modified requests.
                   <div class="absolute bottom-full left-4 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-surface-900"></div>
                 </div>
               </div>

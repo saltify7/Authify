@@ -585,7 +585,7 @@ const modifyAndResendRequest = async (sdk: SDK<API, BackendEvents>, originalReqR
     }
     
     // Merge headers: start with filtered original headers, then add auth headers
-    const modifiedHeaders = { ...filteredHeaders, ...authHeaders };
+    let modifiedHeaders = { ...filteredHeaders, ...authHeaders };
     for (const [name, value] of Object.entries(authHeaders)) {
       sdk.console.log(`Modified header: ${name}: ${value}`);
     }
@@ -593,18 +593,24 @@ const modifyAndResendRequest = async (sdk: SDK<API, BackendEvents>, originalReqR
     // Extract body from original request
     const body = headerEndIndex < lines.length ? lines.slice(headerEndIndex + 1).join('\r\n') : '';
 
-    // Apply match & replace rules to the request body (if any rules are configured)
+    // Apply match & replace rules across the entire request (headers, request line, and body)
     let modifiedBody = body;
+    let requestLine = lines[0]; // GET /path HTTP/1.1
     if (hasEnabledMatchReplaceRules()) {
-      modifiedBody = applyMatchReplaceRules(body);
-      if (modifiedBody !== body) {
-        sdk.console.log(`Applied match & replace rules to request body`);
+      const result = applyMatchReplaceRules(body, requestLine, modifiedHeaders);
+      modifiedBody = result.body;
+      if (result.requestLine !== undefined) {
+        requestLine = result.requestLine;
+      }
+      if (result.headers !== undefined) {
+        modifiedHeaders = result.headers;
+      }
+      if (modifiedBody !== body || requestLine !== lines[0]) {
+        sdk.console.log(`Applied match & replace rules across entire request (headers, path, and body)`);
       }
     }
 
     // Reconstruct the modified request
-    const requestLine = lines[0]; // GET /path HTTP/1.1
-    
     let modifiedReqRaw = requestLine + '\r\n';
     
     // Add all headers
@@ -887,7 +893,7 @@ export async function init(sdk: SDK<API, BackendEvents>) {
   sdk.api.register("getCurrentProjectId", getCurrentProjectId);
   sdk.api.register("saveMatchReplaceRules", saveMatchReplaceRules);
   sdk.api.register("getMatchReplaceRules", getMatchReplaceRules);
-  sdk.api.register("applyMatchReplaceRules", (sdk: SDK, body: string) => applyMatchReplaceRules(body));
+  sdk.api.register("applyMatchReplaceRules", (sdk: SDK, body: string) => applyMatchReplaceRules(body).body);
   sdk.api.register("hasEnabledMatchReplaceRules", (sdk: SDK) => hasEnabledMatchReplaceRules());
   sdk.api.register("storeHttpqlFilter", storeHttpqlFilter);
   sdk.api.register("getStoredHttpqlFilter", getStoredHttpqlFilter);

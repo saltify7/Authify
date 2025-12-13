@@ -15,7 +15,7 @@ You can use the "How to use" guide in the plugin's navigation bar or find a brie
 
 ### Additional functionality:
 - Individual scope selection to filter what Requests are processed by Authify
-- Configure Match & Replace rules to replace strings such as CSRF tokens in the request body of repeated requests
+- Configure Match & Replace rules to replace strings such as CSRF tokens in repeated requests
 - Choose to filter certain requests to reduce clutter (OPTIONS requests, styling, javascript and image files)
 - Advanced filtering of requests using HTTPQL
 - "Send to Replay" sends the current request to a new Replay session
@@ -30,6 +30,8 @@ You can use the "How to use" guide in the plugin's navigation bar or find a brie
 <img width="1732" height="395" alt="Screenshot 2025-09-24 000016" src="https://github.com/user-attachments/assets/dc8efe19-1531-4375-bb1d-4dbb8eb2cbdb" />
 
 ## Installation guide
+
+Download from Caido Community Plugin Tab or follow the manual installation instructions below:
 
 - Download the .zip file from https://github.com/saltify7/Authify/releases
 - Install to Caido https://docs.caido.io/guides/plugins_installing.html
