@@ -1056,27 +1056,29 @@ const ignorePathInHttpql = async (row: Row) => {
               </div>
               <span v-if="isEnabled" class="text-xs text-amber-400">(Read-only while monitoring)</span>
             </div>
-            <div class="w-full">
-              <Textarea
-                v-model="auth"
-                class="w-full"
-                rows="8"
-                :readonly="isEnabled"
-                placeholder="Paste authentication headers (Cookie, Authorization, etc. - one per line)...
+            <div class="bg-surface-800 border border-surface-700 rounded-lg p-4">
+              <div class="w-full">
+                <Textarea
+                  v-model="auth"
+                  class="w-full"
+                  rows="8"
+                  :readonly="isEnabled"
+                  placeholder="Paste authentication headers (Cookie, Authorization, etc. - one per line)...
                 
 e.g. 
 Cookie: session_id=abc123;
 X-CSRF-Token: def456"
-                @input="autoSaveAuthHeaders"
-                :pt="{
-                  root: { 
-                    class: `w-full bg-surface-800 border-surface-700 text-surface-0 rounded-lg ${isEnabled ? 'opacity-75' : ''}` 
-                  },
-                  input: {
-                    class: 'w-full bg-surface-800 text-surface-0 placeholder:text-surface-400 resize-none overflow-auto rounded-lg'
-                  }
-                }"
-              />
+                  @input="autoSaveAuthHeaders"
+                  :pt="{
+                    root: { 
+                      class: `w-full bg-surface-700 border border-surface-600 text-surface-0 rounded-lg ${isEnabled ? 'opacity-75' : ''}` 
+                    },
+                    input: {
+                      class: 'w-full bg-surface-700 text-surface-0 placeholder:text-surface-400 resize-none overflow-auto rounded-lg'
+                    }
+                  }"
+                />
+              </div>
             </div>
           </div>
           
@@ -1281,7 +1283,7 @@ X-CSRF-Token: def456"
               <div class="relative group">
                 <i class="fas fa-info-circle text-surface-400 text-sm cursor-help"></i>
                 <div class="absolute top-full left-0 mt-2 px-3 py-2 bg-surface-900 text-surface-0 text-sm rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
-                  For advanced filtering, create a filter using the button below configure it from the "Custom Authify filter" in the Overview > Filters sidebar.
+                  For advanced filtering, create a filter using the button below and configure it from the "Custom Authify filter" in the Overview > Filters sidebar.
                   <div class="absolute bottom-full left-4 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-surface-900"></div>
                 </div>
               </div>

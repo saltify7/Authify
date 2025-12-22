@@ -868,7 +868,7 @@ export type API = DefineAPI<{
   getCurrentProjectId: typeof getCurrentProjectId;
   saveMatchReplaceRules: typeof saveMatchReplaceRules;
   getMatchReplaceRules: typeof getMatchReplaceRules;
-  applyMatchReplaceRules: (sdk: SDK, body: string) => string;
+  applyMatchReplaceRules: (sdk: SDK, body: string, requestLine?: string, headers?: Record<string, string>) => { body: string; requestLine?: string; headers?: Record<string, string> };
   hasEnabledMatchReplaceRules: (sdk: SDK) => boolean;
   storeHttpqlFilter: typeof storeHttpqlFilter;
   getStoredHttpqlFilter: typeof getStoredHttpqlFilter;
@@ -893,7 +893,7 @@ export async function init(sdk: SDK<API, BackendEvents>) {
   sdk.api.register("getCurrentProjectId", getCurrentProjectId);
   sdk.api.register("saveMatchReplaceRules", saveMatchReplaceRules);
   sdk.api.register("getMatchReplaceRules", getMatchReplaceRules);
-  sdk.api.register("applyMatchReplaceRules", (sdk: SDK, body: string) => applyMatchReplaceRules(body).body);
+  sdk.api.register("applyMatchReplaceRules", (sdk: SDK, body: string, requestLine?: string, headers?: Record<string, string>) => applyMatchReplaceRules(body, requestLine, headers));
   sdk.api.register("hasEnabledMatchReplaceRules", (sdk: SDK) => hasEnabledMatchReplaceRules());
   sdk.api.register("storeHttpqlFilter", storeHttpqlFilter);
   sdk.api.register("getStoredHttpqlFilter", getStoredHttpqlFilter);

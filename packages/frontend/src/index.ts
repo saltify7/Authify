@@ -79,26 +79,32 @@ async function applyHeadersToReplay(sdk: any, requestText: string, authHeaders: 
   }
 
   // Add new auth headers
-  const modifiedHeaders = { ...filteredHeaders, ...newAuthHeaders };
+  let modifiedHeaders = { ...filteredHeaders, ...newAuthHeaders };
 
   // Reconstruct the request
-  const requestLine = lines[0]; // GET /path HTTP/1.1
+  let requestLine = lines[0]; // GET /path HTTP/1.1
   const body = headerEndIndex < lines.length ? lines.slice(headerEndIndex + 1).join('\r\n') : '';
   
-  // Apply match & replace rules to the request body (if any rules are configured)
+  // Apply match & replace rules across the entire request (headers, request line, and body)
   let modifiedBody = body;
   try {
     const hasRules = await sdk.backend.hasEnabledMatchReplaceRules();
     if (hasRules) {
-      const modifiedBodyResult = await sdk.backend.applyMatchReplaceRules(body);
-      modifiedBody = modifiedBodyResult;
-      if (modifiedBody !== body) {
-        console.log(`Applied match & replace rules to request body`);
+      const result = await sdk.backend.applyMatchReplaceRules(body, requestLine, modifiedHeaders);
+      modifiedBody = result.body;
+      if (result.requestLine !== undefined) {
+        requestLine = result.requestLine;
+      }
+      if (result.headers !== undefined) {
+        modifiedHeaders = result.headers;
+      }
+      if (modifiedBody !== body || requestLine !== lines[0]) {
+        console.log(`Applied match & replace rules across entire request (headers, path, and body)`);
       }
     }
   } catch (error) {
     console.warn("Error applying match & replace rules:", error);
-    // Continue with original body if match & replace fails
+    // Continue with original values if match & replace fails
   }
   
   let modifiedRequest = requestLine + '\r\n';

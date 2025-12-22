@@ -93,7 +93,7 @@ export class ScopesManager {
             // Stored scope no longer exists, default to "Unset Scope"
             this.selectedScope.value = '';
             console.log("Previously selected scope no longer exists, defaulting to 'Unset Scope'");
-            this.sdk.window.showToast("Previously selected scope no longer available", { variant: "warning" });
+            this.sdk.window.showToast("Authify: Previously selected scope no longer available", { variant: "warning" });
           }
         } else {
           // No stored scope, default to "Unset Scope"
