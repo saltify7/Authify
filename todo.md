@@ -1,6 +1,8 @@
 ## UI
 - compare responses widget (diff) with synced scrolling
 - colour-code methods in table?
+- highlight currently selected row
+- actually clear table when still receiving requests
 
 ## LOGIC
 - drop requests (if possible to intercept, resend and drop)

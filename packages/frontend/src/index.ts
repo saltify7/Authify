@@ -174,43 +174,37 @@ export const init = (sdk: FrontendSDK) => {
   // Helper function to extract request IDs from BaseContext (replay and http-history pages)
   const getRequestIdsFromBaseContext = (): string[] => {
     try {
-      let requestId: string | undefined;
+      // Simple approach: find any element with data-request-id attribute
+      const element = document.querySelector("[data-request-id]");
       
-      switch (location.hash) {
-        case "#/http-history": {
-          console.log("Getting request from http-history HTML");
-          
-          // there's always a request selected in http history
-          requestId = document
-            .querySelector(".c-response[data-request-id]")
-            ?.getAttribute("data-request-id") as string;
-          
-          break;
-        }
-        case "#/replay": {
-          console.log("Getting request from replay HTML");
-          
-          const div: Element | null = document.querySelector(
-            ".c-response[data-request-id]"
-          );
-          if (!div) {
-            throw new Error("Request must be sent first");
-          }
-          
-          requestId = div.getAttribute("data-request-id") as string;
-          break;
-        }
-        default:
-          throw new Error("Can't find request");
+      if (!element) {
+        throw new Error("No element with data-request-id found in current page");
       }
       
-      if (requestId) {
-        return [requestId];
-      } else {
-        throw new Error("No request ID found in current page");
+      const requestId = element.getAttribute("data-request-id");
+      
+      if (!requestId) {
+        throw new Error("Element found but data-request-id attribute is empty");
+
       }
+      
+      console.log(`Found request ID: ${requestId}`);
+      console.log(`Element details:`, {
+        tag: element.tagName,
+        classes: element.className,
+        id: element.id,
+      });
+
+      // If requestId starts with "v", show toast to user to send request first
+      if (requestId !== undefined && requestId.charAt(0) === "v") {
+        sdk.window.showToast("Please send the request first before using this feature.", { variant: "warning" });
+        return [];
+      }
+      
+      return [requestId];
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      sdk.window.showToast(errorMessage, { variant: "error" });
       throw new Error(`No request found in current page: ${errorMessage}`);
     }
   };

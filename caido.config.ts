@@ -12,7 +12,7 @@ export default defineConfig({
   id,
   name: "Authify",
   description: "Plugin for seamless Authorization testing of user roles",
-  version: "1.0.1",
+  version: "1.1.0",
   author: {
     name: "Saltify",
     email: "saltify7@gmail.com",
