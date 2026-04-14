@@ -20,7 +20,7 @@ You can use the "How to use" guide in the plugin's navigation bar or find a brie
 - Advanced filtering of requests using HTTPQL
 - "Send to Replay" sends the current request to a new Replay session
 - Memory of selected scope and Config between Caido restarts
-<img width="1915" height="991" alt="image" src="https://github.com/user-attachments/assets/5e588cb4-d9bf-4b6b-b17a-0f796a4c2a04" />
+<img width="2230" height="1237" alt="image" src="https://github.com/user-attachments/assets/a985cd70-1df2-464b-b06c-4ef569ab98ee" />
 
 
 ### Context Menu and Shortcuts:
