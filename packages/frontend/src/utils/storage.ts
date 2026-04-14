@@ -1,5 +1,4 @@
 import type { FrontendSDK } from "../types";
-import { JSONCompatible } from "@caido/sdk-frontend/src/types/utils";
 
 // Define the structure of our unified storage
 interface AuthifyStorage {
@@ -12,6 +11,7 @@ interface AuthifyStorage {
     match: string;
     replace: string;
     enabled: boolean;
+    type?: 'string' | 'regex';
   }>; // Legacy global match & replace rules (deprecated)
   "authify-project-match-replace-rules"?: Array<[string, Array<{
     id: string;
@@ -46,8 +46,7 @@ export class StorageManager {
   // Save all storage data
   private async saveAllStorage(storageData: AuthifyStorage): Promise<void> {
     try {
-      const jsonCompatibleData = storageData as JSONCompatible<AuthifyStorage>;
-      await this.sdk.storage.set(jsonCompatibleData);
+      await (this.sdk.storage.set as (value: AuthifyStorage) => Promise<void>)(storageData);
       console.log("Saved all settings to sdk.storage");
     } catch (error) {
       console.warn("Could not save settings to sdk.storage:", error);

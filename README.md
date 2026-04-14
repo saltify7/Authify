@@ -15,7 +15,7 @@ You can use the "How to use" guide in the plugin's navigation bar or find a brie
 
 ### Additional functionality:
 - Individual scope selection to filter what Requests are processed by Authify
-- Configure Match & Replace rules to replace strings such as CSRF tokens in repeated requests
+- Configure Match & Replace rules to replace strings or regex patterns (with capture group support) such as CSRF tokens in repeated requests
 - Choose to filter certain requests to reduce clutter (OPTIONS requests, styling, javascript and image files)
 - Advanced filtering of requests using HTTPQL
 - "Send to Replay" sends the current request to a new Replay session

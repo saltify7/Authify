@@ -40,8 +40,8 @@ importers:
   packages/backend:
     devDependencies:
       '@caido/sdk-backend':
-        specifier: ^0.55.1
-        version: 0.55.1
+        specifier: ^0.56.0
+        version: 0.56.0
 
   packages/frontend:
     dependencies:
@@ -56,11 +56,11 @@ importers:
         version: 3.4.37(typescript@5.5.4)
     devDependencies:
       '@caido/sdk-backend':
-        specifier: ^0.55.1
-        version: 0.55.1
+        specifier: ^0.56.0
+        version: 0.56.0
       '@caido/sdk-frontend':
-        specifier: ^0.55.1
-        version: 0.55.1(@ai-sdk/provider@3.0.5)(@codemirror/state@6.5.2)(@codemirror/view@6.28.1)(vue@3.4.37(typescript@5.5.4))
+        specifier: ^0.56.0
+        version: 0.56.0(@ai-sdk/provider@3.0.5)(@codemirror/state@6.5.2)(@codemirror/view@6.28.1)(vue@3.4.37(typescript@5.5.4))
       '@codemirror/view':
         specifier: 6.28.1
         version: 6.28.1
@@ -118,22 +118,22 @@ packages:
   '@caido/primevue@0.1.2':
     resolution: {integrity: sha512-PCv6qyvlWEKB97PLRzPHDjs7ZGW5JQrD6jvJiMEiprfu4IR5/dXiqRJ4M5g293qn+RAffBuiXcna0vWSxrg5lQ==}
 
-  '@caido/quickjs-types@0.25.4':
-    resolution: {integrity: sha512-U7Cvi4aHoCN8T2JB+Az3ArqQ3MUK0PRCtBm5Sq1rfqaJ9NymAkh3O29q77Keh3G/zINq2WTkKZq5qJlvrQNl+Q==}
+  '@caido/quickjs-types@0.26.0':
+    resolution: {integrity: sha512-Nnpu87fnTvVxEdLUQXAc9d763vj13GPcQEhSWireuLlDPDgxM/7dK8kZdOhGX/BhWRRZ7nUzNc3IdN+OVdsoSA==}
 
-  '@caido/sdk-backend@0.55.1':
-    resolution: {integrity: sha512-aOLwI9O7RBGjATz4DpjgnhwiGfMpxnJEB+0x1SefPwqKEMjaCA8ViNMx316QZ1KeIBJbCuVhNMOVxUrYW0B3Gw==}
+  '@caido/sdk-backend@0.56.0':
+    resolution: {integrity: sha512-OG0bx0fVkByRanUYokVyeMqzjq2zdXyuqsQ6NcnycI7N1wAEHCu4daoeesy4l+chuFNJxHIxJP8JwP68Rh4SbA==}
 
-  '@caido/sdk-frontend@0.55.1':
-    resolution: {integrity: sha512-AJqpqA+Dlh3jZvYKLyVIb8HQIOT5TJLrDQ1JBr0zhIopptSGqIEZaY2BADYOq667HOwS3Xi/jKuVlboTSjOFnA==}
+  '@caido/sdk-frontend@0.56.0':
+    resolution: {integrity: sha512-1g0KD/8qFgNOfyfLaALJBVEvN44fXjXEYpQLOVyqW9uD1NkrUDG1gvkrxvQziRxUSpoEqzTSqWoiDQCtkQSMjA==}
     peerDependencies:
       '@ai-sdk/provider': ^3.0.1
       '@codemirror/state': ^6.0.0
       '@codemirror/view': ^6.0.0
       vue: ^3.0.0
 
-  '@caido/sdk-shared@0.1.1':
-    resolution: {integrity: sha512-JAV5ajUqxZdXYPTmDEvIKBZon8I5uHq44ATj0Nj3BVpllRDUGY9kcBd+PXMD50+3lv1CvhR3/f6q24T0+4aVJQ==}
+  '@caido/sdk-shared@0.2.1':
+    resolution: {integrity: sha512-pxioQ/SISu/Kd+dSur36ri5FXfFXEJShuq10CAZnHqV0L/x6vmXyIsJjTf9m0b7lrMmPnr6WncB/JWMSaVT1wA==}
 
   '@caido/tailwindcss@0.0.1':
     resolution: {integrity: sha512-BGp7s8BiZv6eBV8x/j0t5nPBVKP7Bm+gJVY4APcFgFkNkrRSRDo0VuXN52OhiHc/+vTg85lrmLO8IWMM5bcJrQ==}
@@ -2508,21 +2508,21 @@ snapshots:
 
   '@caido/primevue@0.1.2': {}
 
-  '@caido/quickjs-types@0.25.4': {}
+  '@caido/quickjs-types@0.26.0': {}
 
-  '@caido/sdk-backend@0.55.1':
+  '@caido/sdk-backend@0.56.0':
     dependencies:
-      '@caido/quickjs-types': 0.25.4
-      '@caido/sdk-shared': 0.1.1
+      '@caido/quickjs-types': 0.26.0
+      '@caido/sdk-shared': 0.2.1
 
-  '@caido/sdk-frontend@0.55.1(@ai-sdk/provider@3.0.5)(@codemirror/state@6.5.2)(@codemirror/view@6.28.1)(vue@3.4.37(typescript@5.5.4))':
+  '@caido/sdk-frontend@0.56.0(@ai-sdk/provider@3.0.5)(@codemirror/state@6.5.2)(@codemirror/view@6.28.1)(vue@3.4.37(typescript@5.5.4))':
     dependencies:
       '@ai-sdk/provider': 3.0.5
       '@codemirror/state': 6.5.2
       '@codemirror/view': 6.28.1
       vue: 3.4.37(typescript@5.5.4)
 
-  '@caido/sdk-shared@0.1.1': {}
+  '@caido/sdk-shared@0.2.1': {}
 
   '@caido/tailwindcss@0.0.1':
     dependencies:

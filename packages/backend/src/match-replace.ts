@@ -11,6 +11,7 @@ export type MatchReplaceRule = {
   match: string;
   replace: string;
   enabled: boolean;
+  type: 'string' | 'regex';
 };
 
 // Match & Replace state
@@ -34,51 +35,57 @@ export const getStoredMatchReplaceRules = (): MatchReplaceRule[] => {
 };
 
 // Helper function to apply a single rule to a string
-const applyRuleToString = (text: string, rule: MatchReplaceRule): string => {
+const applyRuleToString = (text: string, rule: MatchReplaceRule, sdk?: { console: { log(msg: string): void } }): string => {
   if (!text || text.trim() === '') {
     return text;
   }
-  
-  try {
-    // Use global replace to replace all occurrences
-    const regex = new RegExp(escapeRegExp(rule.match), 'g');
-    return text.replace(regex, rule.replace);
-  } catch (error) {
-    // If regex creation fails, fall back to simple string replacement
-    return text.replace(new RegExp(rule.match.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), rule.replace);
+
+  if ((rule.type ?? 'string') === 'regex') {
+    try {
+      const regex = new RegExp(rule.match, 'g');
+      return text.replace(regex, rule.replace);
+    } catch (error) {
+      sdk?.console.log(`Match & replace: invalid regex pattern "${rule.match}" — skipping rule`);
+      return text;
+    }
   }
+
+  // String mode: escape pattern so it matches literally
+  const regex = new RegExp(escapeRegExp(rule.match), 'g');
+  return text.replace(regex, rule.replace);
 };
 
 // Apply match & replace rules across the entire request (headers, request line, and body)
 export const applyMatchReplaceRules = (
-  body: string, 
-  requestLine?: string, 
-  headers?: Record<string, string>
+  body: string,
+  requestLine?: string,
+  headers?: Record<string, string>,
+  sdk?: { console: { log(msg: string): void } }
 ): { body: string; requestLine?: string; headers?: Record<string, string> } => {
   const enabledRules = storedMatchReplaceRules.filter(rule => rule.enabled && rule.match.trim() !== '');
-  
+
   if (enabledRules.length === 0) {
     return { body, requestLine, headers };
   }
-  
+
   // Apply rules to body
   let modifiedBody = body;
   if (body && body.trim() !== '') {
     for (const rule of enabledRules) {
-      modifiedBody = applyRuleToString(modifiedBody, rule);
+      modifiedBody = applyRuleToString(modifiedBody, rule, sdk);
     }
   }
-  
+
   // Apply rules to request line
   let modifiedRequestLine = requestLine;
   if (requestLine !== undefined && requestLine.trim() !== '') {
     let currentRequestLine = requestLine;
     for (const rule of enabledRules) {
-      currentRequestLine = applyRuleToString(currentRequestLine, rule);
+      currentRequestLine = applyRuleToString(currentRequestLine, rule, sdk);
     }
     modifiedRequestLine = currentRequestLine;
   }
-  
+
   // Apply rules to headers (both names and values)
   let modifiedHeaders = headers;
   if (headers !== undefined) {
@@ -86,23 +93,21 @@ export const applyMatchReplaceRules = (
     for (const [name, value] of Object.entries(headers)) {
       let modifiedName = name;
       let modifiedValue = value;
-      
-      // Apply rules to header name
+
       for (const rule of enabledRules) {
-        modifiedName = applyRuleToString(modifiedName, rule);
+        modifiedName = applyRuleToString(modifiedName, rule, sdk);
       }
-      
-      // Apply rules to header value
+
       if (value && value.trim() !== '') {
         for (const rule of enabledRules) {
-          modifiedValue = applyRuleToString(modifiedValue, rule);
+          modifiedValue = applyRuleToString(modifiedValue, rule, sdk);
         }
       }
-      
+
       modifiedHeaders[modifiedName] = modifiedValue;
     }
   }
-  
+
   return { body: modifiedBody, requestLine: modifiedRequestLine, headers: modifiedHeaders };
 };
 

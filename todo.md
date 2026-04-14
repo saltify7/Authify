@@ -1,13 +1,13 @@
+## HOTKEYS
+- hotkey to switch to Authify
+- hotkey for view modified/original
+
 ## UI
 - compare responses widget (diff) with synced scrolling
 - colour-code methods in table?
-- highlight currently selected row
-- actually clear table when still receiving requests
 
 ## LOGIC
-- drop requests (if possible to intercept, resend and drop)
-    - not traditionally possible due to request sdk being asynchronous - might be possible via some kind of M&R?
-- hotkey for switching between original and modified
+- Drop Original requests
 - "remove headers" option in addition to M&R
 
 ## PERFORMANCE

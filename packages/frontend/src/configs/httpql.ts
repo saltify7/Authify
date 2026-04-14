@@ -1,5 +1,5 @@
 import type { FrontendSDK } from "@/types";
-import type { Filter } from "@caido/sdk-frontend/src/types/filters";
+import type { Filter } from "@caido/sdk-frontend/src/types/types/filter";
 
 // HTTPQL manager class for handling filter operations
 export class HTTPQLManager {

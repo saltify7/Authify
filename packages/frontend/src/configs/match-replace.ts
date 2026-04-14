@@ -8,7 +8,13 @@ export type MatchReplaceRule = {
   match: string;
   replace: string;
   enabled: boolean;
+  type: 'string' | 'regex';
 };
+
+// Backfill `type` on rules loaded from storage before this field existed
+type StoredRule = Omit<MatchReplaceRule, 'type'> & { type?: 'string' | 'regex' };
+const normalizeRules = (rules: StoredRule[]): MatchReplaceRule[] =>
+  rules.map(r => ({ ...r, type: r.type ?? 'string' }));
 
 // Match & Replace manager class
 export class MatchReplaceManager {
@@ -27,7 +33,8 @@ export class MatchReplaceManager {
       id: `rule_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       match: "",
       replace: "",
-      enabled: true
+      enabled: true,
+      type: 'string'
     };
     matchReplaceRules.value.push(newRule);
     this.autoSaveMatchReplaceRules(matchReplaceRules);
@@ -52,10 +59,14 @@ export class MatchReplaceManager {
   }
 
   // Update a match & replace rule field
-  updateMatchReplaceRule(matchReplaceRules: Ref<MatchReplaceRule[]>, id: string, field: 'match' | 'replace', value: string) {
-    const rule = matchReplaceRules.value.find(rule => rule.id === id);
+  updateMatchReplaceRule(matchReplaceRules: Ref<MatchReplaceRule[]>, id: string, field: 'match' | 'replace' | 'type', value: string) {
+    const rule = matchReplaceRules.value.find(r => r.id === id);
     if (rule) {
-      rule[field] = value;
+      if (field === 'type') {
+        rule.type = value as 'string' | 'regex';
+      } else {
+        rule[field] = value;
+      }
       this.autoSaveMatchReplaceRules(matchReplaceRules);
     }
   }
@@ -106,11 +117,11 @@ export class MatchReplaceManager {
       
       // Fallback to storage if backend has no rules
       const rules = await this.storage.loadMatchReplaceRules();
-      return rules || [];
+      return normalizeRules(rules || []);
     } catch (error) {
       console.warn("Error loading match & replace rules from backend, falling back to storage:", error);
       const rules = await this.storage.loadMatchReplaceRules();
-      return rules || [];
+      return normalizeRules(rules || []);
     }
   }
 
@@ -159,7 +170,7 @@ export class MatchReplaceManager {
         const storedRules = await this.storage.loadProjectMatchReplaceRules(result.value);
         if (storedRules !== null) {
           console.log("Restored previously saved match & replace rules for project:", result.value);
-          return storedRules;
+          return normalizeRules(storedRules);
         } else {
           // No stored rules, default to empty array
           console.log("No stored match & replace rules for project, defaulting to empty");

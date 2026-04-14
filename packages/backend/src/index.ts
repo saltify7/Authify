@@ -37,6 +37,7 @@ type Row = {
 
 // Plugin state
 let isPluginEnabled = false;
+let isDropOriginalEnabled = false;
 let lastProcessedRequestId: string | undefined = undefined;
 let capturedTraffic: Array<Row> = [];
 let modifiedRequestIds = new Set<string>();
@@ -392,18 +393,40 @@ const processNewRequest = async (sdk: SDK, req: any, resp: any): Promise<Row | n
   let comparison: "same" | "different" | "similar" | "unknown" = "unknown";
   
   // Process request modification if plugin is enabled and auth headers are available
-  if (isPluginEnabled && getStoredAuthHeaders().trim() && !modifiedRequestIds.has(id)) {
+  if (isPluginEnabled && !isDropOriginalEnabled && getStoredAuthHeaders().trim() && !modifiedRequestIds.has(id)) {
     sdk.console.log(`Processing new request: ${method} ${url}`);
-    
+
     // Mark this request as being modified to prevent recursion
     modifiedRequestIds.add(id);
-    
+
     const modifiedResult = await modifyAndResendRequest(sdk, reqRaw, respRaw);
     modifiedCode = modifiedResult.code;
     modifiedLength = modifiedResult.length;
     modifiedReqRaw = modifiedResult.modifiedReqRaw;
     modifiedRespRaw = modifiedResult.modifiedRespRaw;
     comparison = modifiedResult.comparison;
+  }
+
+  // When drop original is enabled the upstream handler already replaced the outgoing request
+  // with the auth-modified version. What we captured here IS the modified request — show it
+  // in the modified columns only and leave the original columns empty.
+  if (isDropOriginalEnabled) {
+    return {
+      id,
+      method,
+      hostname,
+      path,
+      code: 0,
+      length: 0,
+      modifiedCode: code,
+      modifiedLength: length,
+      reqRaw: "",
+      respRaw: "",
+      modifiedReqRaw: reqRaw,
+      modifiedRespRaw: respRaw,
+      reqSpecRaw,
+      comparison: "unknown"
+    };
   }
 
   return {
@@ -469,22 +492,30 @@ const processPendingResponses = async (sdk: SDK<API, BackendEvents>): Promise<vo
         if (rowIndex !== -1) {
           const row = capturedTraffic[rowIndex];
           if (row !== undefined) {
-            row.code = code;
-            row.length = length;
-            row.respRaw = respRaw;
-            
-            // Re-process comparison logic if we have modified response data
-            if (row.modifiedRespRaw !== "") {
-              const modifiedLength = row.modifiedLength;
-              const modifiedCode = row.modifiedCode;
-              
-              // Compare original and modified responses using the helper function
-              const comparison = compareResponses(code, length, modifiedCode, modifiedLength, respRaw, row.modifiedRespRaw);
-              
-              row.comparison = comparison;
-              sdk.console.log(`Updated response and comparison for request ${id}: ${code}, length: ${length}, comparison: ${comparison}`);
+            // Drop-original rows have reqRaw="" — their captured data belongs in modified columns
+            if (row.reqRaw === "") {
+              row.modifiedCode = code;
+              row.modifiedLength = length;
+              row.modifiedRespRaw = respRaw;
+              sdk.console.log(`Updated modified response for drop-original request ${id}: ${code}, length: ${length}`);
             } else {
-              sdk.console.log(`Updated response for request ${id}: ${code}, length: ${length}`);
+              row.code = code;
+              row.length = length;
+              row.respRaw = respRaw;
+
+              // Re-process comparison logic if we have modified response data
+              if (row.modifiedRespRaw !== "") {
+                const modifiedLength = row.modifiedLength;
+                const modifiedCode = row.modifiedCode;
+
+                // Compare original and modified responses using the helper function
+                const comparison = compareResponses(code, length, modifiedCode, modifiedLength, respRaw, row.modifiedRespRaw);
+
+                row.comparison = comparison;
+                sdk.console.log(`Updated response and comparison for request ${id}: ${code}, length: ${length}, comparison: ${comparison}`);
+              } else {
+                sdk.console.log(`Updated response for request ${id}: ${code}, length: ${length}`);
+              }
             }
             
             updatedIds.add(id);
@@ -510,166 +541,170 @@ const processPendingResponses = async (sdk: SDK<API, BackendEvents>): Promise<vo
   }
 };
 
+type ModifiedRequestBuildResult = {
+  modifiedReqRaw: string;
+  spec: unknown;
+};
+
+const buildModifiedRequestFromRaw = (sdk: SDK<API, BackendEvents>, originalReqRaw: string): ModifiedRequestBuildResult | null => {
+  if (!getStoredAuthHeaders().trim()) {
+    sdk.console.log("No auth headers stored, skipping modification");
+    return null;
+  }
+
+  const lines = originalReqRaw.split(/\r?\n/);
+  if (lines.length < 1) {
+    sdk.console.log("Invalid request format");
+    return null;
+  }
+
+  let headerEndIndex = -1;
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line || line.trim() === "") {
+      headerEndIndex = i;
+      break;
+    }
+  }
+
+  if (headerEndIndex === -1) {
+    headerEndIndex = lines.length;
+  }
+
+  const originalHeaders: Record<string, string> = {};
+  for (let i = 1; i < headerEndIndex; i++) {
+    const line = lines[i];
+    if (line) {
+      const trimmedLine = line.trim();
+      const colonIndex = trimmedLine.indexOf(":");
+      if (colonIndex > 0) {
+        const headerName = trimmedLine.substring(0, colonIndex).trim();
+        const headerValue = trimmedLine.substring(colonIndex + 1).trim();
+        originalHeaders[headerName] = headerValue;
+      }
+    }
+  }
+
+  const authLines = getStoredAuthHeaders()
+    .split("\n")
+    .filter(line => line.trim());
+  const authHeaders: Record<string, string> = {};
+  for (const line of authLines) {
+    const colonIndex = line.indexOf(":");
+    if (colonIndex > 0) {
+      const headerName = line.substring(0, colonIndex).trim();
+      const headerValue = line.substring(colonIndex + 1).trim();
+      authHeaders[headerName] = headerValue;
+    }
+  }
+
+  const configHeaderNames = Object.keys(authHeaders);
+
+  const filteredHeaders: Record<string, string> = {};
+  for (const [name, value] of Object.entries(originalHeaders)) {
+    const lowerName = name.toLowerCase();
+    const shouldReplace = configHeaderNames.some(configName => lowerName === configName.toLowerCase());
+    if (!shouldReplace) {
+      filteredHeaders[name] = value;
+    }
+  }
+
+  let modifiedHeaders = { ...filteredHeaders, ...authHeaders };
+  for (const [name, value] of Object.entries(authHeaders)) {
+    sdk.console.log(`Modified header: ${name}: ${value}`);
+  }
+
+  const body = headerEndIndex < lines.length ? lines.slice(headerEndIndex + 1).join("\r\n") : "";
+
+  let modifiedBody = body;
+  let requestLine = lines[0];
+  if (hasEnabledMatchReplaceRules()) {
+    const result = applyMatchReplaceRules(body, requestLine, modifiedHeaders, sdk);
+    modifiedBody = result.body;
+    if (result.requestLine !== undefined) {
+      requestLine = result.requestLine;
+    }
+    if (result.headers !== undefined) {
+      modifiedHeaders = result.headers;
+    }
+    if (modifiedBody !== body || requestLine !== lines[0]) {
+      sdk.console.log("Applied match & replace rules across entire request (headers, path, and body)");
+    }
+  }
+
+  let modifiedReqRaw = requestLine + "\r\n";
+
+  for (const [name, value] of Object.entries(modifiedHeaders)) {
+    modifiedReqRaw += `${name}: ${value}\r\n`;
+  }
+
+  modifiedReqRaw += "\r\n";
+  if (modifiedBody) {
+    modifiedReqRaw += modifiedBody;
+  }
+
+  const RequestSpecCtor = (sdk as unknown as { RequestSpec?: unknown }).RequestSpec || (globalThis as unknown as { RequestSpec?: unknown }).RequestSpec;
+  if (!RequestSpecCtor) {
+    sdk.console.log("RequestSpec not available");
+    return { modifiedReqRaw, spec: null };
+  }
+
+  const requestParts = requestLine?.split(" ");
+  if (!requestParts || requestParts.length < 3) {
+    sdk.console.log("Invalid request line format");
+    return { modifiedReqRaw, spec: null };
+  }
+
+  const method = requestParts[0];
+  const path = requestParts[1];
+
+  const host = modifiedHeaders.Host ?? modifiedHeaders.host;
+  if (!host) {
+    sdk.console.log("No Host header found");
+    return { modifiedReqRaw, spec: null };
+  }
+
+  const protocol = modifiedHeaders["X-Forwarded-Proto"] || "https";
+  const fullUrl = `${protocol}://${host}${path}`;
+
+  const SpecConstructor = RequestSpecCtor as { new (url: string): unknown };
+  const spec = new SpecConstructor(fullUrl) as {
+    setMethod(method: string): void;
+    setHeader(name: string, value: string): void;
+    setBody(body: string): void;
+  };
+
+  spec.setMethod(method as string);
+
+  for (const [name, value] of Object.entries(modifiedHeaders)) {
+    if (name.toLowerCase() !== "host") {
+      spec.setHeader(name, value);
+    }
+  }
+
+  if (modifiedBody.trim()) {
+    spec.setBody(modifiedBody);
+  }
+
+  return { modifiedReqRaw, spec };
+};
+
 // Function to modify request with auth headers and resend
 const modifyAndResendRequest = async (sdk: SDK<API, BackendEvents>, originalReqRaw: string, originalRespRaw: string): Promise<{ code: number; length: number; modifiedReqRaw: string; modifiedRespRaw: string; comparison: "same" | "different" | "similar" | "unknown" }> => {
   try {
-    if (!getStoredAuthHeaders().trim()) {
-      sdk.console.log("No auth headers stored, skipping modification");
+    const buildResult = buildModifiedRequestFromRaw(sdk, originalReqRaw);
+    if (!buildResult || buildResult.spec === null) {
       return { code: 0, length: 0, modifiedReqRaw: "", modifiedRespRaw: "", comparison: "unknown" };
     }
 
-    // Parse the original raw request
-    const lines = originalReqRaw.split(/\r?\n/);
-    if (lines.length < 1) {
-      sdk.console.log("Invalid request format");
-      return { code: 0, length: 0, modifiedReqRaw: "", modifiedRespRaw: "", comparison: "unknown" };
-    }
+    const modifiedReqRaw = buildResult.modifiedReqRaw;
 
-    // Find the empty line that separates headers from body
-    let headerEndIndex = -1;
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i];
-      // Check for empty line (either completely empty or just whitespace)
-      if (!line || line.trim() === '') {
-        headerEndIndex = i;
-        break;
-      }
-    }
-
-    // If no separator found, assume all remaining lines are headers
-    if (headerEndIndex === -1) {
-      headerEndIndex = lines.length;
-    }
-
-    // Parse headers from original request
-    const originalHeaders: Record<string, string> = {};
-    for (let i = 1; i < headerEndIndex; i++) {
-      const line = lines[i];
-      if (line) {
-        const trimmedLine = line.trim();
-        const colonIndex = trimmedLine.indexOf(':');
-        if (colonIndex > 0) {
-          const headerName = trimmedLine.substring(0, colonIndex).trim();
-          const headerValue = trimmedLine.substring(colonIndex + 1).trim();
-          originalHeaders[headerName] = headerValue;
-        }
-      }
-    }
-
-    // Parse stored auth headers
-    const authLines = getStoredAuthHeaders().split('\n').filter(line => line.trim());
-    const authHeaders: Record<string, string> = {};
-    for (const line of authLines) {
-      const colonIndex = line.indexOf(':');
-      if (colonIndex > 0) {
-        const headerName = line.substring(0, colonIndex).trim();
-        const headerValue = line.substring(colonIndex + 1).trim();
-        authHeaders[headerName] = headerValue;
-      }
-    }
-    
-    // Get the header names from the config to know which ones to replace
-    const configHeaderNames = Object.keys(authHeaders);
-    
-    // Remove existing headers that match the ones in config (case-insensitive)
-    const filteredHeaders: Record<string, string> = {};
-    for (const [name, value] of Object.entries(originalHeaders)) {
-      const lowerName = name.toLowerCase();
-      const shouldReplace = configHeaderNames.some(configName => 
-        lowerName === configName.toLowerCase()
-      );
-      
-      if (!shouldReplace) {
-        filteredHeaders[name] = value;
-      }
-    }
-    
-    // Merge headers: start with filtered original headers, then add auth headers
-    let modifiedHeaders = { ...filteredHeaders, ...authHeaders };
-    for (const [name, value] of Object.entries(authHeaders)) {
-      sdk.console.log(`Modified header: ${name}: ${value}`);
-    }
-
-    // Extract body from original request
-    const body = headerEndIndex < lines.length ? lines.slice(headerEndIndex + 1).join('\r\n') : '';
-
-    // Apply match & replace rules across the entire request (headers, request line, and body)
-    let modifiedBody = body;
-    let requestLine = lines[0]; // GET /path HTTP/1.1
-    if (hasEnabledMatchReplaceRules()) {
-      const result = applyMatchReplaceRules(body, requestLine, modifiedHeaders);
-      modifiedBody = result.body;
-      if (result.requestLine !== undefined) {
-        requestLine = result.requestLine;
-      }
-      if (result.headers !== undefined) {
-        modifiedHeaders = result.headers;
-      }
-      if (modifiedBody !== body || requestLine !== lines[0]) {
-        sdk.console.log(`Applied match & replace rules across entire request (headers, path, and body)`);
-      }
-    }
-
-    // Reconstruct the modified request
-    let modifiedReqRaw = requestLine + '\r\n';
-    
-    // Add all headers
-    for (const [name, value] of Object.entries(modifiedHeaders)) {
-      modifiedReqRaw += `${name}: ${value}\r\n`;
-    }
-    
-    // Add empty line and body
-    modifiedReqRaw += '\r\n';
-    if (modifiedBody) {
-      modifiedReqRaw += modifiedBody;
-    }
-
-    // Convert raw request to RequestSpec and send
-    const RequestSpec = (sdk as any).RequestSpec || (globalThis as any).RequestSpec;
-    if (!RequestSpec) {
-      sdk.console.log("RequestSpec not available");
-      return { code: 0, length: 0, modifiedReqRaw, modifiedRespRaw: "", comparison: "unknown" };
-    }
-
-    // Parse request line to get method and path
-    const requestParts = requestLine?.split(' ');
-    if (!requestParts || requestParts.length < 3) {
-      sdk.console.log("Invalid request line format");
-      return { code: 0, length: 0, modifiedReqRaw, modifiedRespRaw: "", comparison: "unknown" };
-    }
-
-    const method = requestParts[0];
-    const path = requestParts[1];
-    
-    // Extract host from Host header
-    const host = modifiedHeaders['Host'] || modifiedHeaders['host'];
-    if (!host) {
-      sdk.console.log("No Host header found");
-      return { code: 0, length: 0, modifiedReqRaw, modifiedRespRaw: "", comparison: "unknown" };
-    }
-
-    // Construct full URL
-    const protocol = modifiedHeaders['X-Forwarded-Proto'] || 'https';
-    const fullUrl = `${protocol}://${host}${path}`;
-
-    // Create and send request
-    const spec = new RequestSpec(fullUrl);
-    spec.setMethod(method);
-    
-    // Set headers (excluding Host which is handled by URL)
-    for (const [name, value] of Object.entries(modifiedHeaders)) {
-      if (name.toLowerCase() !== 'host') {
-        spec.setHeader(name, value);
-      }
-    }
-    
-    // Set body if present (use modified body from match & replace)
-    if (modifiedBody.trim()) {
-      spec.setBody(modifiedBody);
-    }
-
-    // Send the request
-    const result = await sdk.requests.send(spec);
+    const result = await (sdk.requests.send as unknown as (request: unknown) => Promise<{
+      response?: {
+        getRaw(): { toText(): string };
+        getCode(): number;
+      } | undefined;
+    }>).call(sdk.requests, buildResult.spec);
     
     if (result && result.response) {
       const modifiedRespRaw = result.response.getRaw()?.toText() ?? "";
@@ -708,6 +743,87 @@ const modifyAndResendRequest = async (sdk: SDK<API, BackendEvents>, originalReqR
     sdk.console.log(`Error modifying and resending request: ${error}`);
     return { code: 0, length: 0, modifiedReqRaw: "", modifiedRespRaw: "", comparison: "unknown" };
   }
+};
+
+const handleUpstreamRequest = (sdk: SDK<API, BackendEvents>, request: unknown): unknown => {
+  if (!isPluginEnabled || !isDropOriginalEnabled) {
+    return undefined;
+  }
+
+  const rawRequest = request as { getRaw(): Uint8Array };
+
+  const RequestSpecCtor = (sdk as unknown as { RequestSpec?: unknown }).RequestSpec || (globalThis as unknown as { RequestSpec?: unknown }).RequestSpec;
+  if (!RequestSpecCtor) {
+    sdk.console.log("RequestSpec not available in onUpstream");
+    return undefined;
+  }
+
+  const SpecParser = RequestSpecCtor as {
+    parse(raw: unknown): {
+      getMethod(): string;
+      getUrl(): string;
+      getPath(): string;
+    };
+  };
+
+  let specForFilter;
+  try {
+    specForFilter = SpecParser.parse(request);
+  } catch (error) {
+    sdk.console.log(`Upstream: failed to parse request for filtering: ${error}`);
+    return undefined;
+  }
+
+  const method = specForFilter.getMethod();
+  const url = specForFilter.getUrl();
+
+  if (shouldFilterRequest(specForFilter as unknown as { getMethod(): string; getPath(): string })) {
+    sdk.console.log(`Upstream: filtered out request: ${method} ${url} (file extension or method filter)`);
+    return undefined;
+  }
+
+  if (getSelectedScopeInternal() && getSelectedScopeInternal().trim() !== "") {
+    try {
+      const isInScope = isUrlInScope(sdk, url);
+      sdk.console.log(`Upstream isInScope: ${isInScope} : ${url}`);
+      if (!isInScope) {
+        sdk.console.log(`Upstream: skipping request - URL ${url} not in scope ${getSelectedScopeInternal()}`);
+        return undefined;
+      }
+    } catch (scopeError) {
+      sdk.console.log(`Upstream: error checking scope for request ${url}: ${scopeError}`);
+      return undefined;
+    }
+  }
+
+  const rawBytes = rawRequest.getRaw();
+  let originalReqRaw = "";
+  try {
+    const TextDecoderCtor = (globalThis as unknown as { TextDecoder?: new () => { decode(data: Uint8Array): string } }).TextDecoder;
+    if (TextDecoderCtor) {
+      const decoder = new TextDecoderCtor();
+      originalReqRaw = decoder.decode(rawBytes);
+    }
+  } catch (decodeError) {
+    sdk.console.log(`Upstream: error decoding raw request: ${decodeError}`);
+  }
+
+  if (!originalReqRaw) {
+    sdk.console.log("Upstream: empty raw request, skipping modification");
+    return undefined;
+  }
+
+  const buildResult = buildModifiedRequestFromRaw(sdk, originalReqRaw);
+  if (!buildResult || buildResult.spec === null) {
+    sdk.console.log("Upstream: failed to build modified request, leaving original unchanged");
+    return undefined;
+  }
+
+  sdk.console.log(`Upstream: overriding request with modified version for ${method} ${url}`);
+
+  return {
+    request: buildResult.spec
+  };
 };
 
 // RUNNING LOGIC
@@ -795,6 +911,17 @@ const setPluginEnabled = async (sdk: SDK<API, BackendEvents>, enabled: boolean):
   }
 };
 
+const setDropOriginalEnabled = async (sdk: SDK<API, BackendEvents>, enabled: boolean): Promise<Result<void>> => {
+  try {
+    isDropOriginalEnabled = enabled;
+    sdk.console.log(`Drop Original Request mode ${enabled ? "enabled" : "disabled"}`);
+    return { kind: "Ok", value: undefined };
+  } catch (error) {
+    sdk.console.log(`Error setting Drop Original Request mode: ${error}`);
+    return { kind: "Error", error: `Failed to set Drop Original Request mode: ${error}` };
+  }
+};
+
 // Clear traffic table
 const clearTraffic = async (sdk: SDK<API, BackendEvents>): Promise<Result<void>> => {
   try {
@@ -853,6 +980,7 @@ const getCurrentProjectId = async (sdk: SDK<API, BackendEvents>): Promise<Result
 export type API = DefineAPI<{
   getTraffic: typeof getTraffic;
   setPluginEnabled: typeof setPluginEnabled;
+  setDropOriginalEnabled: typeof setDropOriginalEnabled;
   saveAuthHeaders: typeof saveAuthHeaders;
   getAuthHeaders: typeof getAuthHeaders;
   modifyAndResendRequest: typeof modifyAndResendRequest;
@@ -878,6 +1006,7 @@ export type API = DefineAPI<{
 export async function init(sdk: SDK<API, BackendEvents>) {
   sdk.api.register("getTraffic", getTraffic);
   sdk.api.register("setPluginEnabled", setPluginEnabled);
+  sdk.api.register("setDropOriginalEnabled", setDropOriginalEnabled);
   sdk.api.register("saveAuthHeaders", saveAuthHeaders);
   sdk.api.register("getAuthHeaders", getAuthHeaders);
   sdk.api.register("modifyAndResendRequest", modifyAndResendRequest);
@@ -893,7 +1022,7 @@ export async function init(sdk: SDK<API, BackendEvents>) {
   sdk.api.register("getCurrentProjectId", getCurrentProjectId);
   sdk.api.register("saveMatchReplaceRules", saveMatchReplaceRules);
   sdk.api.register("getMatchReplaceRules", getMatchReplaceRules);
-  sdk.api.register("applyMatchReplaceRules", (sdk: SDK, body: string, requestLine?: string, headers?: Record<string, string>) => applyMatchReplaceRules(body, requestLine, headers));
+  sdk.api.register("applyMatchReplaceRules", (sdk: SDK, body: string, requestLine?: string, headers?: Record<string, string>) => applyMatchReplaceRules(body, requestLine, headers, sdk));
   sdk.api.register("hasEnabledMatchReplaceRules", (sdk: SDK) => hasEnabledMatchReplaceRules());
   sdk.api.register("storeHttpqlFilter", storeHttpqlFilter);
   sdk.api.register("getStoredHttpqlFilter", getStoredHttpqlFilter);
@@ -903,6 +1032,9 @@ export async function init(sdk: SDK<API, BackendEvents>) {
   sdk.events.onInterceptResponse(async (sdk, request, response) => {
     await handleInterceptedResponse(sdk, request, response);
   });
+
+  // Cast upstream handler through any to satisfy SDK typing while delegating logic to handleUpstreamRequest
+  sdk.events.onUpstream(((pluginSdk: SDK<API, BackendEvents>, request: unknown) => handleUpstreamRequest(pluginSdk, request)) as unknown as (...args: any[]) => any);
 
   // Register event listener for project changes to refresh scopes
   sdk.events.onProjectChange(async (sdk, project) => {
